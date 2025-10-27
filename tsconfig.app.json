@@ -5,10 +5,14 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["vite/client"],
+
+    /* Important: let TS import manifest.json, and recognize Chrome/Node types */
+    "resolveJsonModule": true,
+    "types": ["vite/client", "chrome", "node"],
+
     "skipLibCheck": true,
 
-    /* Bundler mode */
+    /* Bundler mode (keep original settings) */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -16,7 +20,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* Linting */
+    /* Linting (keep original settings) */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -24,5 +28,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+
+  /* Important: include these files in type checking (for editor recognition) */
+  "include": ["src", "manifest.json", "index.html", "vite.config.ts"]
 }

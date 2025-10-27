@@ -1,35 +1,65 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import { useEffect, useMemo, useState } from 'react'
+import { listNotes, clearNotes, getSetting, setSetting } from './services/storage'
+import type { Note } from './utils/messaging'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [notes, setNotes] = useState<Note[]>([])
+  const [q, setQ] = useState('')
+  const [lang, setLang] = useState('zh')
+
+  useEffect(() => { (async () => {
+    setNotes(await listNotes())
+    const saved = await getSetting<string>('targetLang')
+    if (saved) setLang(saved)
+  })() }, [])
+
+  const filtered = useMemo(() =>
+    notes.filter(n => (n.text + (n.snippet||'') + n.pageTitle).toLowerCase().includes(q.toLowerCase()))
+  , [notes, q])
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `ai-notes-${Date.now()}.json`; a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="popup-root">
+      <h3>AI Notes</h3>
+      <div className="row">
+        <input placeholder="Search notes…" value={q} onChange={e=>setQ(e.target.value)} />
+        <select value={lang} onChange={async e => { const v = e.target.value; setLang(v); await setSetting('targetLang', v) }}>
+          <option value="zh">中文</option><option value="en">English</option>
+          <option value="ja">日本語</option><option value="es">Español</option>
+        </select>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
+
+      <div className="note-list">
+        {filtered.map(n => (
+          <div key={n.id} className="note-card">
+            <div className="meta">
+              <a href={n.sourceUrl} target="_blank">{n.pageTitle}</a>
+              <span> · {new Date(n.createdAt).toLocaleString()}</span>
+            </div>
+            <div className="kind">{n.kind}</div>
+            <div className="text">{n.text}</div>
+            {n.snippet && (
+              <details className="snippet">
+                <summary>Original snippet</summary>
+                <pre>{n.snippet}</pre>
+              </details>
+            )}
+          </div>
+        ))}
+        {!filtered.length && <div className="empty">No notes yet. Select text on any page → use the tooltip.</div>}
       </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+
+      <div className="row">
+        <button onClick={exportJSON}>Export JSON</button>
+        <button onClick={async ()=>{ await clearNotes(); setNotes([]) }}>Clear All</button>
+      </div>
+    </div>
   )
 }
-
-export default App

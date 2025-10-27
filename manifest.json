@@ -1,9 +1,52 @@
 {
     "manifest_version": 3,
-    "name": "Hello Extension",
-    "version": "1.0.0",
+    "name": "Chrome AI Companion (Local)",
+    "version": "0.1.0",
+    "description": "Summarize selections or full pages, explain terms, translate, and save notes — all on-device.",
+    "icons": {
+        "16": "icon16.png",
+        "32": "icon32.png",
+        "48": "icon48.png",
+        "128": "icon128.png"
+    },
     "action": {
-      "default_popup": "index.html"
-    }
+      "default_popup": "index.html",
+      "default_title": "AI Companion",
+      "default_icon": {
+        "16": "icon16.png",
+        "32": "icon32.png"
+      }
+    },
+    "background": {
+      "service_worker": "src/background/index.ts",
+      "type": "module"
+    },
+    "permissions": ["activeTab", "scripting", "storage", "contextMenus"],
+    "host_permissions": ["<all_urls>"],
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["src/content/index.ts"],
+        "css": ["src/content/styles.css"],
+        "run_at": "document_idle",
+        "all_frames": true
+      }
+    ],
+    "commands": {
+      "toggle-panel": {
+        "suggested_key": { "default": "Alt+Shift+P" },
+        "description": "Toggle AI side panel"
+      }
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+              "assets/*",
+              "src/content/*",
+              "public/*"
+            ],
+            "matches": ["<all_urls>"]
+          }
+    ]
   }
   

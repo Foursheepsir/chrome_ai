@@ -1,0 +1,16 @@
+.ai-tip {
+    position: absolute; z-index: 2147483647; display: none; gap: 6px;
+    background: white; border: 1px solid #ddd; padding: 6px 8px;
+    border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12);
+    font-family: ui-sans-serif, system-ui; font-size: 12px;
+  }
+  .ai-tip button {
+    border: none; padding: 6px 8px; background: #f4f4f4; border-radius: 8px; cursor: pointer;
+  }
+  .ai-tip button:hover { background: #eaeaea }
+  .ai-bubble {
+    position: fixed; right: 20px; bottom: 20px;
+    background: #111; color: #fff; padding: 8px 12px;
+    border-radius: 10px; z-index: 2147483647; opacity: .9; font-size: 12px;
+  }
+  
