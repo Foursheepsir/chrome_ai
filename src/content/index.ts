@@ -1,6 +1,6 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
 import { summarize, explain, translate } from '../services/aiService'
-import { addNote, getSetting } from '../services/storage'
+import { addNote, getSetting, setSetting } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 
@@ -138,36 +138,117 @@ let sidePanelContentEl: HTMLDivElement | null = null
 let sidePanelOpen = false
 
 function ensureFloatingButton() {
-  if (floatBtnEl) return floatBtnEl
-  const el = document.createElement('div')
-  el.id = '__ai_float_btn__'
-  el.className = 'ai-float-btn'
-  el.title = 'Summarize this page'
-
-  const img = document.createElement('img')
-  img.src = chrome.runtime.getURL('icon128.png')
-  img.alt = 'AI'
-  img.style.width = '100%'
-  img.style.height = '100%'
-  img.style.objectFit = 'contain'
-  img.style.borderRadius = '50%'
-  img.style.pointerEvents = 'none'
-  el.appendChild(img)
+    if (floatBtnEl) return floatBtnEl
   
-
-  document.documentElement.appendChild(el)
-
-  el.addEventListener('click', async () => {
-    if (sidePanelOpen) {
-      hideSidePanel()
-      return
+    const el = document.createElement('div')
+    el.id = '__ai_float_btn__'
+    el.className = 'ai-float-btn'
+    el.title = 'Summarize this page'
+    document.documentElement.appendChild(el)
+  
+    // 用背景图方式（已在 CSS 配好），也可以换成 <img> 方案
+  
+    // —— 读取上次位置（可选持久化） —— //
+    ;(async () => {
+      const pos = await getSetting<{ left: number; top: number }>('floatPos')
+      if (pos) {
+        el.style.left = `${pos.left}px`
+        el.style.top = `${pos.top}px`
+      } else {
+        // 默认右下角
+        el.style.right = '24px'
+        el.style.bottom = '24px'
+      }
+    })()
+  
+    // —— 拖动支持（鼠标 + 触摸） —— //
+    let dragging = false
+    let startX = 0, startY = 0
+    let startLeft = 0, startTop = 0
+    let moved = false
+    const DRAG_THRESHOLD = 4 // 像素，区分点击/拖动
+  
+    const onPointerDown = (clientX: number, clientY: number) => {
+      dragging = true
+      moved = false
+      el.classList.add('dragging')
+  
+      // 将 right/bottom 切换为 left/top 以便拖动
+      const rect = el.getBoundingClientRect()
+      el.style.right = 'auto'
+      el.style.bottom = 'auto'
+      startLeft = rect.left
+      startTop = rect.top
+      startX = clientX
+      startY = clientY
     }
-    await openPanelAndSummarizePage()
-  })
-
-  floatBtnEl = el
-  return el
-}
+  
+    const onPointerMove = (clientX: number, clientY: number) => {
+      if (!dragging) return
+      const dx = clientX - startX
+      const dy = clientY - startY
+      if (!moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) moved = true
+  
+      // 计算并钳制到窗口内
+      const left = Math.min(
+        Math.max(0, startLeft + dx),
+        window.innerWidth - el.offsetWidth
+      )
+      const top = Math.min(
+        Math.max(0, startTop + dy),
+        window.innerHeight - el.offsetHeight
+      )
+      el.style.left = `${left}px`
+      el.style.top = `${top}px`
+    }
+  
+    const onPointerUp = async () => {
+      if (!dragging) return
+      dragging = false
+      el.classList.remove('dragging')
+  
+      // 持久化位置
+      const rect = el.getBoundingClientRect()
+      await setSetting('floatPos', { left: rect.left, top: rect.top })
+  
+      // 如果没有明显移动，当作点击
+      if (!moved) {
+        // 点击：开始旋转 → 生成整页 Summary → 停止旋转
+        if (sidePanelOpen) {
+          hideSidePanel()
+          return
+        }
+        el.classList.add('spinning')
+        try {
+          await openPanelAndSummarizePage()
+        } finally {
+          el.classList.remove('spinning')
+        }
+      }
+    }
+  
+    // 鼠标
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      onPointerDown(e.clientX, e.clientY)
+    })
+    document.addEventListener('mousemove', (e) => onPointerMove(e.clientX, e.clientY))
+    document.addEventListener('mouseup', () => onPointerUp())
+  
+    // 触摸
+    el.addEventListener('touchstart', (e) => {
+      const t = e.touches[0]
+      onPointerDown(t.clientX, t.clientY)
+    }, { passive: true })
+    document.addEventListener('touchmove', (e) => {
+      const t = e.touches[0]
+      onPointerMove(t.clientX, t.clientY)
+    }, { passive: true })
+    document.addEventListener('touchend', () => onPointerUp())
+  
+    floatBtnEl = el
+    return el
+  }
 
 async function openPanelAndSummarizePage() {
   ensureSidePanel()

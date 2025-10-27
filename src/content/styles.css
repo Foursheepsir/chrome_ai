@@ -35,20 +35,27 @@
   /* 悬浮球（整页 summary 触发） */
   .ai-float-btn {
     position: fixed;
-    right: 24px;
-    bottom: 24px;
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    overflow: hidden; /* 关键，避免图片超出圆形边界 */
-    background: #fff;
-    box-shadow: 0 10px 24px rgba(0,0,0,0.2);
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    width: 64px;
+    height: 64px;
+    border: none;
+    background: transparent;
+    background-image: url(chrome-extension://__MSG_@@extension_id__/icon128.png);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    cursor: grab;
+    z-index: 2147483647;
+    user-select: none;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.25));
+    transition: transform 0.2s ease;
   }
-  .ai-float-btn:hover {
-    transform: scale(1.08);
-    box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+  .ai-float-btn:hover { transform: scale(1.05); }
+  .ai-float-btn.dragging { cursor: grabbing; opacity: 0.9; }
+  
+  @keyframes ai-spin { to { transform: rotate(360deg); } }
+  .ai-float-btn.spinning {
+    animation: ai-spin 1s linear infinite;
+    filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.15));
   }
   
   
