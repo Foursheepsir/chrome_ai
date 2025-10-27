@@ -1,10 +1,14 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
 import { summarize, explain, translate } from '../services/aiService'
 import { addNote, getSetting } from '../services/storage'
-import type { Note } from '../utils/messaging'
+import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 
-// tooltip
+/** ---------------- Tooltip（选区操作条） ---------------- */
+
+let lastSelectionRect: DOMRect | null = null
+let resultBubbleEl: HTMLDivElement | null = null
+
 function ensureTooltip() {
   let tip = document.getElementById('__ai_companion_tip__') as HTMLDivElement | null
   if (!tip) {
@@ -17,133 +21,226 @@ function ensureTooltip() {
       <button data-act="tr">Translate</button>
     `
     document.documentElement.appendChild(tip)
+
+    tip.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement
+      const act = t.getAttribute('data-act')
+      if (act) handleAction(act as 'summ' | 'exp' | 'tr')
+    })
   }
   return tip
 }
+
 function positionTooltip(tip: HTMLDivElement) {
   const sel = document.getSelection()
   if (!sel || sel.rangeCount === 0) return
   const rect = sel.getRangeAt(0).getBoundingClientRect()
+  lastSelectionRect = rect
   tip.style.top = `${window.scrollY + rect.bottom + 6}px`
   tip.style.left = `${window.scrollX + rect.left}px`
   tip.style.display = 'flex'
 }
+
 document.addEventListener('mouseup', () => {
   const txt = getSelectionText()
   const tip = ensureTooltip()
   tip.style.display = txt ? 'flex' : 'none'
   if (txt) positionTooltip(tip)
 })
-ensureTooltip().addEventListener('click', (e) => {
-  const t = e.target as HTMLElement
-  const act = t.getAttribute('data-act')
-  if (act) handleAction(act as 'summ'|'exp'|'tr'|'save')
+
+/** ---------------- 结果气泡（常驻，直到点击外部或按 Esc） ---------------- */
+
+function hideResultBubble() {
+  resultBubbleEl?.remove()
+  resultBubbleEl = null
+}
+
+function showResultBubble(markupOrText: string) {
+  hideResultBubble()
+  const el = document.createElement('div')
+  el.className = 'ai-result-bubble'
+  el.innerHTML = escapeHtml(markupOrText).replace(/\n/g, '<br/>')
+  document.documentElement.appendChild(el)
+
+  const base = lastSelectionRect
+  const top = base ? window.scrollY + base.bottom + 8 : window.scrollY + 80
+  const left = base ? window.scrollX + base.left : window.scrollX + 80
+  el.style.top = `${top}px`
+  el.style.left = `${left}px`
+
+  resultBubbleEl = el
+}
+
+document.addEventListener('mousedown', (e) => {
+  const target = e.target as Node
+  const tip = document.getElementById('__ai_companion_tip__')
+  if (resultBubbleEl && !resultBubbleEl.contains(target) && (!tip || !tip.contains(target))) {
+    hideResultBubble()
+  }
 })
 
-async function handleAction(action: 'summ'|'exp'|'tr'|'save') {
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideResultBubble()
+})
+
+function escapeHtml(str: string) {
+  const div = document.createElement('div')
+  div.innerText = str
+  return div.innerHTML
+}
+
+/** ---------------- 选区按钮行为 ---------------- */
+
+async function handleAction(action: 'summ' | 'exp' | 'tr') {
   const selected = getSelectionText()
-  if (!selected && action !== 'save') return
+  if (!selected) return
 
   const targetLang = (await getSetting<string>('targetLang')) || 'zh'
   let result = ''
 
-  if (action === 'summ') {
-    result = await summarize(selected, { maxWords: 120 })
-    await saveNote('summary', result, selected)
-  } else if (action === 'exp') {
-    const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? selected
-    result = await explain(selected, { context: ctx })
-    await saveNote('explain', result, selected)
-  } else if (action === 'tr') {
-    result = await translate(selected, { targetLang })
-    await saveNote('translation', result, selected)
-  } else if (action === 'save') {
-    const text = extractReadableText(document)
-    const pageSum = await summarize(text, { maxWords: 180 })
-    await saveNote('summary', pageSum, text.slice(0, 300))
-    showBubble('Page summary saved')
-    return
+  try {
+    if (action === 'summ') {
+      result = await summarize(selected, { maxWords: 120 })
+    } else if (action === 'exp') {
+      const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? selected
+      result = await explain(selected, { context: ctx })
+    } else if (action === 'tr') {
+      result = await translate(selected, { targetLang })
+    }
+    showResultBubble(result)
+  } catch (e) {
+    console.error('[AI action error]', e)
+    showResultBubble('⚠️ Failed. Please try again.')
   }
-
-  if (result) showBubble('Added to Notes')
 }
-async function saveNote(kind: Note['kind'], text: string, snippet?: string) {
+
+/** ---------------- 保存笔记 ---------------- */
+
+async function saveNoteToStore(kind: Note['kind'], text: string, snippet?: string) {
   const note: Note = {
     id: nanoid(),
     sourceUrl: location.href,
     pageTitle: document.title,
-    kind, text, snippet,
-    createdAt: Date.now(), lang: 'auto'
+    kind,
+    text,
+    snippet,
+    createdAt: Date.now(),
+    lang: 'auto',
   }
   await addNote(note)
 }
-function showBubble(text: string) {
+
+/** ---------------- 悬浮球 + 侧边栏（整页 Summary） ---------------- */
+
+let floatBtnEl: HTMLDivElement | null = null
+let sidePanelEl: HTMLDivElement | null = null
+let sidePanelContentEl: HTMLDivElement | null = null
+let sidePanelOpen = false
+
+function ensureFloatingButton() {
+  if (floatBtnEl) return floatBtnEl
   const el = document.createElement('div')
-  el.className = 'ai-bubble'
-  el.textContent = text
+  el.id = '__ai_float_btn__'
+  el.className = 'ai-float-btn'
+  el.title = 'Summarize this page'
+
+  const img = document.createElement('img')
+  img.src = chrome.runtime.getURL('icon128.png')
+  img.alt = 'AI'
+  img.style.width = '100%'
+  img.style.height = '100%'
+  img.style.objectFit = 'contain'
+  img.style.borderRadius = '50%'
+  img.style.pointerEvents = 'none'
+  el.appendChild(img)
+  
+
   document.documentElement.appendChild(el)
-  setTimeout(() => el.remove(), 1200)
+
+  el.addEventListener('click', async () => {
+    if (sidePanelOpen) {
+      hideSidePanel()
+      return
+    }
+    await openPanelAndSummarizePage()
+  })
+
+  floatBtnEl = el
+  return el
 }
 
-// 背景消息
-chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
-  const handle = async () => {
-    try {
-      if (msg.type === 'SUMMARIZE_PAGE') {
-        const text = extractReadableText(document)
-        const result = await summarize(text, { maxWords: 180 })
-        await saveNote('summary', result, text.slice(0, 300))
-        showBubble('Page summary saved')
-        sendResponse({ ok: true })
-        return
-      }
-
-      if (msg.type === 'SUMMARIZE_SELECTION') {
-        const sel = getSelectionText()
-        if (!sel) { sendResponse({ ok: false, reason: 'no selection' }); return }
-        const result = await summarize(sel, { maxWords: 120 })
-        await saveNote('summary', result, sel)
-        showBubble('Summary saved')
-        sendResponse({ ok: true })
-        return
-      }
-
-      if (msg.type === 'EXPLAIN_SELECTION') {
-        const sel = getSelectionText()
-        if (!sel) { sendResponse({ ok: false, reason: 'no selection' }); return }
-        const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? sel
-        const result = await explain(sel, { context: ctx })
-        await saveNote('explain', result, sel)
-        showBubble('Explanation saved')
-        sendResponse({ ok: true })
-        return
-      }
-
-      if (msg.type === 'TRANSLATE_SELECTION') {
-        const sel = getSelectionText()
-        if (!sel) { sendResponse({ ok: false, reason: 'no selection' }); return }
-        const result = await translate(sel, { targetLang: msg.targetLang || 'zh' })
-        await saveNote('translation', result, sel)
-        showBubble('Translation saved')
-        sendResponse({ ok: true })
-        return
-      }
-
-      // 未处理的消息：不要返回 true，也不要 sendResponse
-      // 这样就不会出现“承诺异步响应但没发”的错误
-    } catch (e) {
-      console.error(e)
-      try { sendResponse({ ok: false, error: String(e) }) } catch {}
-    }
+async function openPanelAndSummarizePage() {
+  ensureSidePanel()
+  showSidePanel('Generating summary...')
+  try {
+    const text = extractReadableText(document)
+    const res = await summarize(text, { maxWords: 220 })
+    sidePanelContentEl!.innerHTML = `
+      <div class="ai-panel-actions">
+        <button id="__ai_save_page_note__">Save to Notes</button>
+      </div>
+      <div class="ai-panel-content">${escapeHtml(res).replace(/\n/g, '<br/>')}</div>
+    `
+    const saveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
+    saveBtn?.addEventListener('click', async () => {
+      await saveNoteToStore('summary', res, text.slice(0, 300))
+      if (saveBtn) saveBtn.textContent = 'Saved ✓'
+    })
+  } catch (e) {
+    console.error(e)
+    showSidePanel('⚠️ Failed to summarize this page.')
   }
+}
 
-  // 只有在我们会异步 sendResponse 的时候才返回 true
-  const willHandle =
-    msg?.type === 'SUMMARIZE_PAGE' ||
-    msg?.type === 'SUMMARIZE_SELECTION' ||
-    msg?.type === 'EXPLAIN_SELECTION' ||
-    msg?.type === 'TRANSLATE_SELECTION'
+function ensureSidePanel() {
+  if (sidePanelEl) return sidePanelEl
+  const wrap = document.createElement('div')
+  wrap.id = '__ai_side_panel__'
+  wrap.className = 'ai-sidepanel'
+  wrap.innerHTML = `
+    <div class="ai-sidepanel-header">
+      <div class="ai-sidepanel-title">Page Summary</div>
+      <button class="ai-sidepanel-close" title="Close">x</button>
+    </div>
+    <div class="ai-sidepanel-body">
+      <div class="ai-sidepanel-scroll">
+        <div class="ai-sidepanel-content" id="__ai_side_content__"></div>
+      </div>
+    </div>
+  `
+  document.documentElement.appendChild(wrap)
+  sidePanelEl = wrap
+  sidePanelContentEl = wrap.querySelector('#__ai_side_content__') as HTMLDivElement
 
-  if (willHandle) { handle(); return true }
+  wrap.querySelector('.ai-sidepanel-close')!.addEventListener('click', () => hideSidePanel())
+  return wrap
+}
+
+function showSidePanel(initialText?: string) {
+  ensureSidePanel()
+  sidePanelEl!.classList.add('open')
+  sidePanelOpen = true
+  if (typeof initialText === 'string') {
+    sidePanelContentEl!.innerText = initialText
+  }
+}
+
+function hideSidePanel() {
+  sidePanelEl?.classList.remove('open')
+  sidePanelOpen = false
+}
+
+ensureTooltip()
+ensureFloatingButton()
+
+/** ---------------- 背景消息（右键菜单触发） ---------------- */
+chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
+  if (msg?.type === 'SUMMARIZE_PAGE') {
+    (async () => {
+      await openPanelAndSummarizePage()
+      sendResponse({ ok: true })
+    })()
+    return true
+  }
   return false
 })
