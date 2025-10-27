@@ -17,46 +17,98 @@
   }
   .ai-tip button:hover { background: #eaeaea }
   
-  /* 结果气泡（常驻，直到点击外部或 Esc） */
-  .ai-result-bubble {
-    position: absolute;
-    z-index: 2147483647;
-    max-width: 420px;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 10px 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,.15);
-    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-    color: #111;
-    word-break: break-word;
-  }
+/* 结果气泡（常驻，直到点击外部或 Esc） */
+.ai-result-bubble {
+  position: absolute;
+  z-index: 2147483647;
+  max-width: 420px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15);
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  color: #111;
+  word-break: break-word;
+}
+
+.ai-bubble-content {
+  margin-bottom: 8px;
+}
+
+  .ai-bubble-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.ai-bubble-save {
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ai-bubble-save:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.ai-bubble-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  background: #e5e7eb;
+}
   
   /* 悬浮球（整页 summary 触发） */
-  .ai-float-btn {
+  .ai-float-btn{
     position: fixed;
     width: 64px;
     height: 64px;
     border: none;
     background: transparent;
-    background-image: url(chrome-extension://__MSG_@@extension_id__/icon128.png);
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
     cursor: grab;
     z-index: 2147483647;
     user-select: none;
-    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.25));
-    transition: transform 0.2s ease;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,0.25));
+    transition: transform .2s ease, filter .2s ease;
   }
   .ai-float-btn:hover { transform: scale(1.05); }
-  .ai-float-btn.dragging { cursor: grabbing; opacity: 0.9; }
+  .ai-float-btn.dragging { cursor: grabbing; opacity: .95; }
   
-  @keyframes ai-spin { to { transform: rotate(360deg); } }
-  .ai-float-btn.spinning {
-    animation: ai-spin 1s linear infinite;
-    filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.15));
+  /* 内部图标层：铺满容器，负责旋转动画 */
+  .ai-float-icon{
+    width: 100%;
+    height: 100%;
+    background: center/contain no-repeat;
+    pointer-events: none; /* 不阻挡拖动/点击 */
   }
+  
+  /* 旋转动画 */
+  @keyframes ai-spin { to { transform: rotate(360deg); } }
+  .ai-float-icon.spinning { animation: ai-spin 1s linear infinite; }
+  
+  /* 左上角关闭按钮（悬停显示） */
+  .ai-float-close{
+    position: absolute;
+    left: -6px; top: -6px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #3b82f6; color: #fff;
+    font-size: 14px; line-height: 18px; text-align:center;
+    box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    cursor: pointer;
+    opacity: 0; transform: scale(.85);
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  .ai-float-btn:hover .ai-float-close{ opacity: 1; transform: scale(1); }
+  
   
   
   
@@ -93,10 +145,29 @@
   .ai-sidepanel-scroll { height: 100%; overflow: auto; padding: 12px; }
   .ai-sidepanel-content { white-space: pre-wrap; }
   
-  .ai-panel-actions { display: flex; gap: 8px; margin-bottom: 8px; }
-  .ai-panel-actions button {
-    border: 1px solid #e5e7eb; background: #f9fafb; padding: 6px 10px;
-    border-radius: 8px; cursor: pointer; font-size: 12px;
+  .ai-panel-actions { 
+    display: flex; 
+    gap: 8px; 
+    margin-bottom: 8px; 
   }
-  .ai-panel-actions button:hover { background: #f3f4f6; }
+  .ai-panel-actions button {
+    border: 1px solid #e5e7eb; 
+    background: #f9fafb; 
+    padding: 4px 10px;
+    border-radius: 6px; 
+    cursor: pointer; 
+    font-size: 12px;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .ai-panel-actions button:hover:not(:disabled) { 
+    background: #f3f4f6;
+    border-color: #d1d5db;
+  }
+  .ai-panel-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+    background: #e5e7eb;
+  }
   

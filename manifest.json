@@ -21,7 +21,7 @@
       "service_worker": "src/background/index.ts",
       "type": "module"
     },
-    "permissions": ["activeTab", "scripting", "storage", "contextMenus"],
+    "permissions": ["activeTab", "scripting", "storage", "contextMenus", "tabs"],
     "host_permissions": ["<all_urls>"],
     "content_scripts": [
       {

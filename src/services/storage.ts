@@ -3,6 +3,7 @@ import type { Note } from '../utils/messaging'
 
 const NOTES_KEY = 'notes'
 const SETTINGS_KEY = 'settings'
+const PAGE_SUMMARIES_KEY = 'pageSummaries'
 
 // ------ 小工具：Promise 封装 ------
 function getLocal<T = any>(key: string): Promise<T | undefined> {
@@ -43,4 +44,28 @@ export async function setSetting(key: string, val: any) {
 export async function getSetting<T = any>(key: string): Promise<T | undefined> {
   const st = (await getLocal<Settings>(SETTINGS_KEY)) || {}
   return st[key] as T | undefined
+}
+
+// ------ Page Summary Cache API ------
+export type PageSummaryCache = {
+  summary: string
+  text: string
+  timestamp: number
+}
+
+export async function getPageSummary(url: string): Promise<PageSummaryCache | undefined> {
+  const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
+  return cache[url]
+}
+
+export async function setPageSummary(url: string, summary: string, text: string) {
+  const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
+  cache[url] = { summary, text, timestamp: Date.now() }
+  await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
+}
+
+export async function clearPageSummary(url: string) {
+  const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
+  delete cache[url]
+  await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
 }

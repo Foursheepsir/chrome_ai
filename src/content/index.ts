@@ -1,10 +1,12 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
 import { summarize, explain, translate } from '../services/aiService'
-import { addNote, getSetting, setSetting } from '../services/storage'
+import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 
 /** ---------------- Tooltip（选区操作条） ---------------- */
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 let lastSelectionRect: DOMRect | null = null
 let resultBubbleEl: HTMLDivElement | null = null
@@ -55,11 +57,38 @@ function hideResultBubble() {
   resultBubbleEl = null
 }
 
-function showResultBubble(markupOrText: string) {
+function showResultBubble(
+  markupOrText: string,
+  opts?: { kind?: Note['kind']; snippet?: string }
+) {
   hideResultBubble()
   const el = document.createElement('div')
   el.className = 'ai-result-bubble'
-  el.innerHTML = escapeHtml(markupOrText).replace(/\n/g, '<br/>')
+  
+  // 内容区域
+  const content = document.createElement('div')
+  content.className = 'ai-bubble-content'
+  content.innerHTML = escapeHtml(markupOrText).replace(/\n/g, '<br/>')
+  el.appendChild(content)
+
+  // 如果提供了保存选项，添加 Save 按钮
+  if (opts?.kind && opts?.snippet) {
+    const actions = document.createElement('div')
+    actions.className = 'ai-bubble-actions'
+    
+    const saveBtn = document.createElement('button')
+    saveBtn.className = 'ai-bubble-save'
+    saveBtn.innerHTML = 'Save to Notes'
+    saveBtn.addEventListener('click', async () => {
+      await saveNoteToStore(opts.kind!, markupOrText, opts.snippet)
+      saveBtn.innerHTML = '✓ Saved'
+      saveBtn.disabled = true
+    })
+    
+    actions.appendChild(saveBtn)
+    el.appendChild(actions)
+  }
+
   document.documentElement.appendChild(el)
 
   const base = lastSelectionRect
@@ -97,17 +126,21 @@ async function handleAction(action: 'summ' | 'exp' | 'tr') {
 
   const targetLang = (await getSetting<string>('targetLang')) || 'zh'
   let result = ''
+  let kind: Note['kind'] = 'summary'
 
   try {
     if (action === 'summ') {
       result = await summarize(selected, { maxWords: 120 })
+      kind = 'summary'
     } else if (action === 'exp') {
       const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? selected
       result = await explain(selected, { context: ctx })
+      kind = 'explain'
     } else if (action === 'tr') {
       result = await translate(selected, { targetLang })
+      kind = 'translation'
     }
-    showResultBubble(result)
+    showResultBubble(result, { kind, snippet: selected })
   } catch (e) {
     console.error('[AI action error]', e)
     showResultBubble('⚠️ Failed. Please try again.')
@@ -144,133 +177,163 @@ function ensureFloatingButton() {
     el.id = '__ai_float_btn__'
     el.className = 'ai-float-btn'
     el.title = 'Summarize this page'
+  
+    // 内部图标层（负责旋转）
+    const icon = document.createElement('div')
+    icon.className = 'ai-float-icon'
+    icon.style.backgroundImage = `url(${chrome.runtime.getURL('icon128.png')})`
+    el.appendChild(icon)
+  
+    // 关闭小图标（左上角，仅悬停可见）
+    const close = document.createElement('div')
+    close.className = 'ai-float-close'
+    close.textContent = '×'
+    el.appendChild(close)
+  
+    close.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      el.style.display = 'none'
+      await setSetting('floatHidden', true)
+    })
+  
     document.documentElement.appendChild(el)
   
-    // 用背景图方式（已在 CSS 配好），也可以换成 <img> 方案
-  
-    // —— 读取上次位置（可选持久化） —— //
+    // 读取上次位置 / 是否隐藏
     ;(async () => {
       const pos = await getSetting<{ left: number; top: number }>('floatPos')
+      const hidden = await getSetting<boolean>('floatHidden')
       if (pos) {
         el.style.left = `${pos.left}px`
         el.style.top = `${pos.top}px`
       } else {
-        // 默认右下角
-        el.style.right = '24px'
-        el.style.bottom = '24px'
+        // 默认左下角，使用 top 计算位置
+        el.style.left = '24px'
+        el.style.top = `${window.innerHeight - 64 - 24}px`
       }
-    })()
-  
-    // —— 拖动支持（鼠标 + 触摸） —— //
-    let dragging = false
-    let startX = 0, startY = 0
-    let startLeft = 0, startTop = 0
-    let moved = false
-    const DRAG_THRESHOLD = 4 // 像素，区分点击/拖动
-  
-    const onPointerDown = (clientX: number, clientY: number) => {
-      dragging = true
-      moved = false
-      el.classList.add('dragging')
-  
-      // 将 right/bottom 切换为 left/top 以便拖动
-      const rect = el.getBoundingClientRect()
       el.style.right = 'auto'
       el.style.bottom = 'auto'
-      startLeft = rect.left
-      startTop = rect.top
-      startX = clientX
-      startY = clientY
-    }
+      if (hidden) el.style.display = 'none'
+    })()
   
+    // —— 拖动支持 ——
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0
+    let moved = false
+    const DRAG_THRESHOLD = 4
+  
+    const onPointerDown = (clientX: number, clientY: number) => {
+      dragging = true; moved = false; el.classList.add('dragging')
+      const rect = el.getBoundingClientRect()
+      startLeft = rect.left; startTop = rect.top
+      startX = clientX; startY = clientY
+    }
     const onPointerMove = (clientX: number, clientY: number) => {
       if (!dragging) return
-      const dx = clientX - startX
-      const dy = clientY - startY
-      if (!moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) moved = true
-  
-      // 计算并钳制到窗口内
-      const left = Math.min(
-        Math.max(0, startLeft + dx),
-        window.innerWidth - el.offsetWidth
-      )
-      const top = Math.min(
-        Math.max(0, startTop + dy),
-        window.innerHeight - el.offsetHeight
-      )
-      el.style.left = `${left}px`
-      el.style.top = `${top}px`
-    }
-  
-    const onPointerUp = async () => {
-      if (!dragging) return
-      dragging = false
-      el.classList.remove('dragging')
-  
-      // 持久化位置
-      const rect = el.getBoundingClientRect()
-      await setSetting('floatPos', { left: rect.left, top: rect.top })
-  
-      // 如果没有明显移动，当作点击
-      if (!moved) {
-        // 点击：开始旋转 → 生成整页 Summary → 停止旋转
-        if (sidePanelOpen) {
-          hideSidePanel()
-          return
-        }
-        el.classList.add('spinning')
-        try {
-          await openPanelAndSummarizePage()
-        } finally {
-          el.classList.remove('spinning')
-        }
+      const dx = clientX - startX, dy = clientY - startY
+      if (!moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+        moved = true
+        // 只在真正开始拖动时才切换定位方式
+        el.style.right = 'auto'
+        el.style.bottom = 'auto'
+      }
+      if (moved) {
+        const left = Math.min(Math.max(0, startLeft + dx), window.innerWidth - el.offsetWidth)
+        const top  = Math.min(Math.max(0, startTop  + dy), window.innerHeight - el.offsetHeight)
+        el.style.left = `${left}px`; el.style.top = `${top}px`
       }
     }
-  
-    // 鼠标
-    el.addEventListener('mousedown', (e) => {
-      e.preventDefault()
-      onPointerDown(e.clientX, e.clientY)
-    })
+    const onPointerUp = async () => {
+      if (!dragging) return
+      dragging = false; el.classList.remove('dragging')
+      if (moved) {
+        const rect = el.getBoundingClientRect()
+        await setSetting('floatPos', { left: rect.left, top: rect.top })
+        return
+      }
+      if (sidePanelOpen) { hideSidePanel(); return }
+      icon.classList.add('spinning')
+      try {
+        await openPanelAndSummarizePage(/* withDelay */ true)
+      } finally {
+        icon.classList.remove('spinning')
+      }
+    }
+    el.addEventListener('mousedown', (e) => { e.preventDefault(); onPointerDown(e.clientX, e.clientY) })
     document.addEventListener('mousemove', (e) => onPointerMove(e.clientX, e.clientY))
-    document.addEventListener('mouseup', () => onPointerUp())
-  
-    // 触摸
-    el.addEventListener('touchstart', (e) => {
-      const t = e.touches[0]
-      onPointerDown(t.clientX, t.clientY)
-    }, { passive: true })
-    document.addEventListener('touchmove', (e) => {
-      const t = e.touches[0]
-      onPointerMove(t.clientX, t.clientY)
-    }, { passive: true })
-    document.addEventListener('touchend', () => onPointerUp())
+    document.addEventListener('mouseup', onPointerUp)
+    el.addEventListener('touchstart', (e) => { const t = e.touches[0]; onPointerDown(t.clientX, t.clientY) }, { passive: true })
+    document.addEventListener('touchmove', (e) => { const t = e.touches[0]; onPointerMove(t.clientX, t.clientY) }, { passive: true })
+    document.addEventListener('touchend', onPointerUp)
   
     floatBtnEl = el
-    return el
-  }
 
-async function openPanelAndSummarizePage() {
-  ensureSidePanel()
-  showSidePanel('Generating summary...')
-  try {
-    const text = extractReadableText(document)
-    const res = await summarize(text, { maxWords: 220 })
-    sidePanelContentEl!.innerHTML = `
-      <div class="ai-panel-actions">
-        <button id="__ai_save_page_note__">Save to Notes</button>
-      </div>
-      <div class="ai-panel-content">${escapeHtml(res).replace(/\n/g, '<br/>')}</div>
-    `
-    const saveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
-    saveBtn?.addEventListener('click', async () => {
-      await saveNoteToStore('summary', res, text.slice(0, 300))
-      if (saveBtn) saveBtn.textContent = 'Saved ✓'
+    window.addEventListener('resize', () => {
+        // if (floatBtnEl) clampFloatIntoView(floatBtnEl)
     })
-  } catch (e) {
-    console.error(e)
-    showSidePanel('⚠️ Failed to summarize this page.')
+    return el
+}
+  
+
+async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false) {
+    ensureSidePanel()
+    showSidePanel('Loading...')
+    
+    const currentUrl = location.href
+    
+    try {
+      // 检查缓存（除非强制刷新）
+      if (!forceRefresh) {
+        const cached = await getPageSummary(currentUrl)
+        if (cached) {
+          // 显示缓存的结果
+          renderPageSummary(cached.summary, cached.text, true)
+          return
+        }
+      }
+      
+      // 生成新的摘要
+      showSidePanel('Generating summary...')
+      const text = extractReadableText(document)
+      if (withDelay) await sleep(1000)
+      const res = await summarize(text, { maxWords: 220 })
+      
+      // 保存到缓存
+      await setPageSummary(currentUrl, res, text)
+      
+      // 显示结果
+      renderPageSummary(res, text, false)
+    } catch (e) {
+      console.error(e)
+      showSidePanel('⚠️ Failed to summarize this page.')
+    }
+}
+
+function renderPageSummary(summary: string, text: string, isCached: boolean) {
+  sidePanelContentEl!.innerHTML = `
+    <div class="ai-panel-actions">
+      <button id="__ai_save_page_note__" ${isCached ? 'disabled' : ''}>
+        ${isCached ? 'Saved ✓' : 'Save to Notes'}
+      </button>
+      <button id="__ai_refresh_summary__">🔄 Refresh</button>
+    </div>
+    <div class="ai-panel-content">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
+  `
+  
+  const saveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
+  if (!isCached) {
+    saveBtn?.addEventListener('click', async () => {
+      await saveNoteToStore('summary', summary, text.slice(0, 300))
+      if (saveBtn) {
+        saveBtn.textContent = 'Saved ✓'
+        saveBtn.disabled = true
+      }
+    })
   }
+  
+  const refreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
+  refreshBtn?.addEventListener('click', async () => {
+    await clearPageSummary(location.href)
+    await openPanelAndSummarizePage(false, true)
+  })
 }
 
 function ensureSidePanel() {
@@ -304,23 +367,34 @@ function showSidePanel(initialText?: string) {
   if (typeof initialText === 'string') {
     sidePanelContentEl!.innerText = initialText
   }
+  // if (floatBtnEl) clampFloatIntoView(floatBtnEl)
 }
 
 function hideSidePanel() {
   sidePanelEl?.classList.remove('open')
   sidePanelOpen = false
+  // if (floatBtnEl) clampFloatIntoView(floatBtnEl)
 }
 
 ensureTooltip()
 ensureFloatingButton()
 
 /** ---------------- 背景消息（右键菜单触发） ---------------- */
-chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
+  if (msg?.type === 'SHOW_FLOAT_AGAIN') {
+    const node = ensureFloatingButton()
+    node.style.display = 'block'
+    // 重置到左下角，使用 top 定位保持一致
+    node.style.left = '24px'
+    node.style.top = `${window.innerHeight - 64 - 24}px`
+    node.style.right = 'auto'
+    node.style.bottom = 'auto'
+    setSetting('floatHidden', false)
+    sendResponse({ ok: true }); return true
+  }
+      
   if (msg?.type === 'SUMMARIZE_PAGE') {
-    (async () => {
-      await openPanelAndSummarizePage()
-      sendResponse({ ok: true })
-    })()
+    (async () => { await openPanelAndSummarizePage(); sendResponse({ ok: true }) })()
     return true
   }
   return false
