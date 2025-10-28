@@ -324,13 +324,15 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
 
 function renderPageSummary(summary: string, text: string, isCached: boolean) {
   sidePanelContentEl!.innerHTML = `
+    <div class="ai-panel-content-wrapper">
+      <div class="ai-panel-text">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
+    </div>
     <div class="ai-panel-actions">
       <button id="__ai_save_page_note__" ${isCached ? 'disabled' : ''}>
         ${isCached ? 'Saved ✓' : 'Save to Notes'}
       </button>
       <button id="__ai_refresh_summary__">🔄 Refresh</button>
     </div>
-    <div class="ai-panel-content">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
   `
   
   const saveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
@@ -380,9 +382,12 @@ function showSidePanel(initialText?: string) {
   sidePanelEl!.classList.add('open')
   sidePanelOpen = true
   if (typeof initialText === 'string') {
-    sidePanelContentEl!.innerText = initialText
+    sidePanelContentEl!.innerHTML = `
+      <div class="ai-panel-content-wrapper">
+        <div class="ai-panel-text">${escapeHtml(initialText)}</div>
+      </div>
+    `
   }
-  // if (floatBtnEl) clampFloatIntoView(floatBtnEl)
 }
 
 function hideSidePanel() {
