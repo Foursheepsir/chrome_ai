@@ -21,13 +21,14 @@ function ensureTooltip() {
       <button data-act="summ">Summarize</button>
       <button data-act="exp">Explain</button>
       <button data-act="tr">Translate</button>
+      <button data-act="save">Save</button>
     `
     document.documentElement.appendChild(tip)
 
     tip.addEventListener('click', (e) => {
       const t = e.target as HTMLElement
       const act = t.getAttribute('data-act')
-      if (act) handleAction(act as 'summ' | 'exp' | 'tr')
+      if (act) handleAction(act as 'summ' | 'exp' | 'tr' | 'save')
     })
   }
   return tip
@@ -120,9 +121,23 @@ function escapeHtml(str: string) {
 
 /** ---------------- 选区按钮行为 ---------------- */
 
-async function handleAction(action: 'summ' | 'exp' | 'tr') {
+async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
   const selected = getSelectionText()
   if (!selected) return
+
+  // 如果是直接保存，不需要AI处理
+  if (action === 'save') {
+    try {
+      await saveNoteToStore('note', selected)
+      showResultBubble('✓ Saved')
+      // 1秒后自动隐藏提示
+      setTimeout(() => hideResultBubble(), 1000)
+    } catch (e) {
+      console.error('[Save error]', e)
+      showResultBubble('⚠️ Failed to save.')
+    }
+    return
+  }
 
   const targetLang = (await getSetting<string>('targetLang')) || 'zh'
   let result = ''

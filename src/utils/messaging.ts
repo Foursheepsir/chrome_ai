@@ -1,4 +1,4 @@
-export type NoteKind = 'summary' | 'explain' | 'translation'
+export type NoteKind = 'summary' | 'explain' | 'translation' | 'note'
 
 export type Note = {
   id: string
