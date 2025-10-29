@@ -146,12 +146,20 @@ export default function App() {
       )}
 
       <div className="row">
-        <button onClick={exportJSON}>Export JSON</button>
+        <button 
+          onClick={exportJSON}
+          disabled={notes.length === 0}
+        >
+          Export JSON
+        </button>
         <button
           onClick={async () => {
-            await clearNotes()
-            setNotes([])
+            if (window.confirm(`Are you sure you want to delete all ${notes.length} note(s)? This action cannot be undone.`)) {
+              await clearNotes()
+              setNotes([])
+            }
           }}
+          disabled={notes.length === 0}
         >
           Clear All
         </button>

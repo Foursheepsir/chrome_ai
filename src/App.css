@@ -201,3 +201,12 @@ html, body {
   box-shadow: 0 2px 8px rgba(234, 67, 53, 0.3);
   transform: translateY(-1px);
 }
+
+.popup-root button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  background: #dadce0 !important;
+  color: #5f6368 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}

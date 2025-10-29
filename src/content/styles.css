@@ -194,9 +194,9 @@
     background: linear-gradient(135deg, #4285f420, #34a85320);
   }
   .ai-sidepanel-title { 
-    font-weight: 500; 
+    font-weight: 600; 
     color: #4285f4;
-    font-size: 15px;
+    font-size: 20px;
   }
   .ai-sidepanel-close {
     border: none; 
