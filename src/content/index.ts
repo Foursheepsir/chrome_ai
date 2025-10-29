@@ -220,21 +220,16 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
 
   try {
     if (action === 'summ') {
-      let isFirstChunk = true
+      // 先显示加载提示
+      showResultBubble('Generating summary...', { showActions: false })
       
       // 使用流式更新 - 选中文本用 key-points（要点列表）
       await summarize(selected, {
         type: 'key-points',
         lang: targetLang,
         onChunk: (chunk) => {
-          if (isFirstChunk) {
-            // 第一次创建气泡（不显示按钮）
-            showResultBubble(chunk, { kind: 'summary', snippet: selected, showActions: false })
-            isFirstChunk = false
-          } else {
-            // 后续只更新内容
-            showResultBubble(chunk, { kind: 'summary', snippet: selected, updateOnly: true })
-          }
+          // 直接更新内容
+          showResultBubble(chunk, { kind: 'summary', snippet: selected, updateOnly: true })
         }
       })
       
@@ -248,20 +243,15 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
       kind = 'explain'
       showResultBubble(result, { kind, snippet: selected, showActions: true })
     } else if (action === 'tr') {
-      let isFirstChunk = true
+      // 先显示加载提示
+      showResultBubble('Translating...', { showActions: false })
       
       // 使用流式更新翻译
       await translate(selected, { 
         targetLang,
         onChunk: (chunk) => {
-          if (isFirstChunk) {
-            // 第一次创建气泡（不显示按钮）
-            showResultBubble(chunk, { kind: 'translation', snippet: selected, showActions: false })
-            isFirstChunk = false
-          } else {
-            // 后续只更新内容
-            showResultBubble(chunk, { kind: 'translation', snippet: selected, updateOnly: true })
-          }
+          // 直接更新内容
+          showResultBubble(chunk, { kind: 'translation', snippet: selected, updateOnly: true })
         }
       })
       

@@ -355,6 +355,13 @@ async function detectLanguage(text: string): Promise<string> {
     if (results && results.length > 0) {
       const topResult = results[0]
       console.log('[AI] Detected language:', topResult.detectedLanguage, 'confidence:', topResult.confidence)
+      
+      // 如果置信度低于 0.7，使用英语兜底
+      if (topResult.confidence < 0.7) {
+        console.log(`[AI] ⚠️ Low confidence (${topResult.confidence.toFixed(2)}), using fallback language (en)`)
+        return 'en'
+      }
+      
       return topResult.detectedLanguage
     }
 
