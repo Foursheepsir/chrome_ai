@@ -1,5 +1,5 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate } from '../services/aiService'
+import { summarize, explain, translate, destroySummarizer } from '../services/aiService'
 import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
@@ -60,8 +60,18 @@ function hideResultBubble() {
 
 function showResultBubble(
   markupOrText: string,
-  opts?: { kind?: Note['kind']; snippet?: string }
+  opts?: { kind?: Note['kind']; snippet?: string; updateOnly?: boolean }
 ) {
+  // 如果是更新模式且气泡已存在，只更新内容
+  if (opts?.updateOnly && resultBubbleEl) {
+    const content = resultBubbleEl.querySelector('.ai-bubble-content')
+    if (content) {
+      content.innerHTML = escapeHtml(markupOrText).replace(/\n/g, '<br/>')
+      return
+    }
+  }
+  
+  // 否则重新创建
   hideResultBubble()
   const el = document.createElement('div')
   el.className = 'ai-result-bubble'
@@ -140,22 +150,38 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
   }
 
   const targetLang = (await getSetting<string>('targetLang')) || 'zh'
-  let result = ''
   let kind: Note['kind'] = 'summary'
 
   try {
     if (action === 'summ') {
-      result = await summarize(selected, { maxWords: 120 })
+      let isFirstChunk = true
+      
+      // 使用流式更新 - 选中文本用 key-points（要点列表）
+      await summarize(selected, {
+        type: 'key-points',
+        onChunk: (chunk) => {
+          if (isFirstChunk) {
+            // 第一次创建气泡（带保存按钮）
+            showResultBubble(chunk, { kind: 'summary', snippet: selected })
+            isFirstChunk = false
+          } else {
+            // 后续只更新内容
+            showResultBubble(chunk, { kind: 'summary', snippet: selected, updateOnly: true })
+          }
+        }
+      })
+      
       kind = 'summary'
     } else if (action === 'exp') {
       const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? selected
-      result = await explain(selected, { context: ctx })
+      const result = await explain(selected, { context: ctx })
       kind = 'explain'
+      showResultBubble(result, { kind, snippet: selected })
     } else if (action === 'tr') {
-      result = await translate(selected, { targetLang })
+      const result = await translate(selected, { targetLang })
       kind = 'translation'
+      showResultBubble(result, { kind, snippet: selected })
     }
-    showResultBubble(result, { kind, snippet: selected })
   } catch (e) {
     console.error('[AI action error]', e)
     showResultBubble('⚠️ Failed. Please try again.')
@@ -309,12 +335,35 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
       showSidePanel('Generating summary...')
       const text = extractReadableText(document)
       if (withDelay) await sleep(1000)
-      const res = await summarize(text, { maxWords: 220 })
+      
+      let isFirstChunk = true
+      
+      // 使用流式更新 - 整页用 tldr（简短概述）
+      const res = await summarize(text, {
+        type: 'tldr',
+        onChunk: (chunk) => {
+          if (isFirstChunk) {
+            // 第一次创建完整结构
+            sidePanelContentEl!.innerHTML = `
+              <div class="ai-panel-content-wrapper">
+                <div class="ai-panel-text">${escapeHtml(chunk).replace(/\n/g, '<br/>')}</div>
+              </div>
+            `
+            isFirstChunk = false
+          } else {
+            // 后续只更新文本内容（chunk 是累积的完整结果）
+            const textEl = sidePanelContentEl!.querySelector('.ai-panel-text')
+            if (textEl) {
+              textEl.innerHTML = escapeHtml(chunk).replace(/\n/g, '<br/>')
+            }
+          }
+        }
+      })
       
       // 保存到缓存
       await setPageSummary(currentUrl, res, text)
       
-      // 显示结果
+      // 显示最终结果和按钮
       renderPageSummary(res, text, false)
     } catch (e) {
       console.error(e)
@@ -399,6 +448,12 @@ function hideSidePanel() {
 ensureTooltip()
 ensureFloatingButton()
 
+/* 诊断 Chrome AI API 状态
+;(async () => {
+  await __diagnoseAI()
+})()
+*/
+
 /** ---------------- 背景消息（右键菜单触发） ---------------- */
 chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
   if (msg?.type === 'SHOW_FLOAT_AGAIN') {
@@ -418,4 +473,9 @@ chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
     return true
   }
   return false
+})
+
+// 页面卸载时清理 AI 资源
+window.addEventListener('beforeunload', () => {
+  destroySummarizer()
 })

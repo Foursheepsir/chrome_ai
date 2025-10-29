@@ -3,13 +3,13 @@
     position: absolute;
     z-index: 2147483647;
     display: none;
-    gap: 4px;
+    gap: 6px;
     background: #ffffff;
     border: 1px solid #dadce0;
-    padding: 4px;
+    padding: 6px;
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,.12);
-    font: 12px/1.2 'Google Sans', system-ui, -apple-system, sans-serif;
+    font: 14px/1.4 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
     backdrop-filter: blur(8px);
   }
   .ai-tip button[data-act="summ"] {
@@ -26,11 +26,11 @@
   }
   .ai-tip button {
     border: none; 
-    padding: 6px 12px; 
+    padding: 8px 14px; 
     color: white;
     border-radius: 6px; 
     cursor: pointer; 
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     transition: all 0.2s ease;
   }
@@ -47,13 +47,13 @@
 .ai-result-bubble {
   position: absolute;
   z-index: 2147483647;
-  max-width: 420px;
+  max-width: 480px;
   background: #ffffff;
   border: 1px solid #dadce0;
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 16px 18px;
   box-shadow: 0 4px 20px rgba(0,0,0,.15);
-  font: 13px/1.5 'Google Sans', system-ui, -apple-system, sans-serif;
+  font: 15px/1.6 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
   color: #202124;
   word-break: break-word;
 }
@@ -226,15 +226,15 @@
     background: #f8f9fa;
   }
   
-  /* 实际文本内容 */
-  .ai-panel-text {
-    white-space: pre-wrap;
-    color: #202124 !important;
-    line-height: 1.6 !important;
-    font-size: 14px !important;
-    font-family: 'Google Sans', system-ui, -apple-system, sans-serif !important;
-    word-wrap: break-word;
-  }
+/* 实际文本内容 */
+.ai-panel-text {
+  white-space: pre-wrap;
+  color: #202124 !important;
+  line-height: 1.7 !important;
+  font-size: 16px !important;
+  font-family: 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
+  word-wrap: break-word;
+}
   
   /* 按钮区域 - 固定在底部 */
   .ai-panel-actions { 
