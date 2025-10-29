@@ -60,13 +60,15 @@ function hideResultBubble() {
 
 function showResultBubble(
   markupOrText: string,
-  opts?: { kind?: Note['kind']; snippet?: string; updateOnly?: boolean }
+  opts?: { kind?: Note['kind']; snippet?: string; updateOnly?: boolean; showActions?: boolean }
 ) {
   // 如果是更新模式且气泡已存在，只更新内容
   if (opts?.updateOnly && resultBubbleEl) {
     const content = resultBubbleEl.querySelector('.ai-bubble-content')
     if (content) {
       content.innerHTML = renderMarkdown(markupOrText)
+      // 更新存储的文本内容（用于保存）
+      resultBubbleEl.setAttribute('data-full-text', markupOrText)
       return
     }
   }
@@ -75,6 +77,8 @@ function showResultBubble(
   hideResultBubble()
   const el = document.createElement('div')
   el.className = 'ai-result-bubble'
+  // 存储完整文本内容（用于保存）
+  el.setAttribute('data-full-text', markupOrText)
   
   // 内容区域
   const content = document.createElement('div')
@@ -82,8 +86,8 @@ function showResultBubble(
   content.innerHTML = renderMarkdown(markupOrText)
   el.appendChild(content)
 
-  // 如果提供了保存选项，添加 Save 按钮
-  if (opts?.kind && opts?.snippet) {
+  // 如果提供了保存选项且 showActions 为 true，添加 Save 按钮
+  if (opts?.kind && opts?.snippet && opts?.showActions) {
     const actions = document.createElement('div')
     actions.className = 'ai-bubble-actions'
     
@@ -91,7 +95,9 @@ function showResultBubble(
     saveBtn.className = 'ai-bubble-save'
     saveBtn.innerHTML = 'Save to Notes'
     saveBtn.addEventListener('click', async () => {
-      await saveNoteToStore(opts.kind!, markupOrText, opts.snippet)
+      // 从元素中读取最新的完整文本
+      const currentText = el.getAttribute('data-full-text') || markupOrText
+      await saveNoteToStore(opts.kind!, currentText, opts.snippet)
       saveBtn.innerHTML = '✓ Saved'
       saveBtn.disabled = true
     })
@@ -109,6 +115,32 @@ function showResultBubble(
   el.style.left = `${left}px`
 
   resultBubbleEl = el
+}
+
+// 添加保存按钮到已存在的气泡
+function addSaveButtonToBubble(kind: Note['kind'], snippet: string) {
+  if (!resultBubbleEl) return
+  
+  // 检查是否已有 actions 区域
+  let actions = resultBubbleEl.querySelector('.ai-bubble-actions') as HTMLDivElement | null
+  if (!actions) {
+    actions = document.createElement('div')
+    actions.className = 'ai-bubble-actions'
+    resultBubbleEl.appendChild(actions)
+  }
+  
+  const saveBtn = document.createElement('button')
+  saveBtn.className = 'ai-bubble-save'
+  saveBtn.innerHTML = 'Save to Notes'
+  saveBtn.addEventListener('click', async () => {
+    // 从元素中读取最新的完整文本
+    const currentText = resultBubbleEl!.getAttribute('data-full-text') || ''
+    await saveNoteToStore(kind, currentText, snippet)
+    saveBtn.innerHTML = '✓ Saved'
+    saveBtn.disabled = true
+  })
+  
+  actions.appendChild(saveBtn)
 }
 
 document.addEventListener('mousedown', (e) => {
@@ -177,6 +209,11 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
     return
   }
 
+  // 禁用 tooltip 的所有按钮
+  const tip = document.getElementById('__ai_companion_tip__')
+  const buttons = tip?.querySelectorAll('button') as NodeListOf<HTMLButtonElement>
+  buttons?.forEach(btn => btn.disabled = true)
+
   const targetLang = (await getSetting<string>('targetLang')) || 'zh'
   let kind: Note['kind'] = 'summary'
 
@@ -189,8 +226,8 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
         type: 'key-points',
         onChunk: (chunk) => {
           if (isFirstChunk) {
-            // 第一次创建气泡（带保存按钮）
-            showResultBubble(chunk, { kind: 'summary', snippet: selected })
+            // 第一次创建气泡（不显示按钮）
+            showResultBubble(chunk, { kind: 'summary', snippet: selected, showActions: false })
             isFirstChunk = false
           } else {
             // 后续只更新内容
@@ -199,20 +236,26 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
         }
       })
       
+      // 生成完成后，添加保存按钮
+      addSaveButtonToBubble('summary', selected)
+      
       kind = 'summary'
     } else if (action === 'exp') {
       const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? selected
       const result = await explain(selected, { context: ctx })
       kind = 'explain'
-      showResultBubble(result, { kind, snippet: selected })
+      showResultBubble(result, { kind, snippet: selected, showActions: true })
     } else if (action === 'tr') {
       const result = await translate(selected, { targetLang })
       kind = 'translation'
-      showResultBubble(result, { kind, snippet: selected })
+      showResultBubble(result, { kind, snippet: selected, showActions: true })
     }
   } catch (e) {
     console.error('[AI action error]', e)
     showResultBubble('⚠️ Failed. Please try again.')
+  } finally {
+    // 重新启用 tooltip 的所有按钮
+    buttons?.forEach(btn => btn.disabled = false)
   }
 }
 
@@ -310,6 +353,7 @@ function ensureFloatingButton() {
         el.style.left = `${left}px`; el.style.top = `${top}px`
       }
     }
+    let isProcessing = false
     const onPointerUp = async () => {
       if (!dragging) return
       dragging = false; el.classList.remove('dragging')
@@ -319,11 +363,17 @@ function ensureFloatingButton() {
         return
       }
       if (sidePanelOpen) { hideSidePanel(); return }
+      
+      // 防止重复点击
+      if (isProcessing) return
+      isProcessing = true
+      
       icon.classList.add('spinning')
       try {
         await openPanelAndSummarizePage(/* withDelay */ true)
       } finally {
         icon.classList.remove('spinning')
+        isProcessing = false
       }
     }
     el.addEventListener('mousedown', (e) => { e.preventDefault(); onPointerDown(e.clientX, e.clientY) })
@@ -359,6 +409,12 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
         }
       }
       
+      // 禁用现有按钮（如果有）
+      const existingSaveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
+      const existingRefreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
+      if (existingSaveBtn) existingSaveBtn.disabled = true
+      if (existingRefreshBtn) existingRefreshBtn.disabled = true
+      
       // 生成新的摘要
       showSidePanel('Generating summary...')
       const text = extractReadableText(document)
@@ -371,7 +427,7 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
         type: 'tldr',
         onChunk: (chunk) => {
           if (isFirstChunk) {
-            // 第一次创建完整结构
+            // 第一次创建完整结构（不显示按钮）
             sidePanelContentEl!.innerHTML = `
               <div class="ai-panel-content-wrapper">
                 <div class="ai-panel-text">${escapeHtml(chunk).replace(/\n/g, '<br/>')}</div>
@@ -391,7 +447,7 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
       // 保存到缓存
       await setPageSummary(currentUrl, res, text)
       
-      // 显示最终结果和按钮
+      // 显示最终结果和按钮（启用状态）
       renderPageSummary(res, text, false)
     } catch (e) {
       console.error(e)

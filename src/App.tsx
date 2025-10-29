@@ -61,6 +61,30 @@ export default function App() {
     URL.revokeObjectURL(url)
   }
 
+  // 渲染 markdown 列表为 HTML
+  const renderMarkdown = (text: string) => {
+    // 检测是否是 markdown 列表
+    const lines = text.split('\n')
+    const isMarkdownList = lines.some(line => /^[-*]\s/.test(line.trim()))
+    
+    if (isMarkdownList) {
+      // 转换为 HTML 列表
+      const listItems = lines
+        .filter(line => line.trim())
+        .map(line => {
+          const trimmed = line.trim()
+          if (/^[-*]\s/.test(trimmed)) {
+            return <li key={trimmed}>{trimmed.replace(/^[-*]\s/, '')}</li>
+          }
+          return <li key={trimmed}>{trimmed}</li>
+        })
+      return <ul style={{ margin: 0, paddingLeft: '20px' }}>{listItems}</ul>
+    }
+    
+    // 不是列表，使用普通文本
+    return text
+  }
+
   return (
     <div className="popup-root">
       <h3>AI Notes</h3>
@@ -86,31 +110,30 @@ export default function App() {
         </select>
       </div>
 
-      <div className="note-list">
-        {filtered.map((n) => (
-          <div key={n.id} className="note-card">
-            <div className="meta">
-              <a href={n.sourceUrl} target="_blank" rel="noreferrer">
-                {n.pageTitle}
-              </a>
-              <span> · {new Date(n.createdAt).toLocaleString()}</span>
+      {filtered.length > 0 ? (
+        <div className="note-list">
+          {filtered.map((n) => (
+            <div key={n.id} className="note-card">
+              <div className="meta">
+                <a href={n.sourceUrl} target="_blank" rel="noreferrer">
+                  {n.pageTitle}
+                </a>
+                <span> · {new Date(n.createdAt).toLocaleString()}</span>
+              </div>
+              <div className="kind">{n.kind}</div>
+              <div className="text">{renderMarkdown(n.text)}</div>
+              {n.snippet && (
+                <details className="snippet">
+                  <summary>Original snippet</summary>
+                  <pre>{n.snippet}...</pre>
+                </details>
+              )}
             </div>
-            <div className="kind">{n.kind}</div>
-            <div className="text">{n.text}</div>
-            {n.snippet && (
-              <details className="snippet">
-                <summary>Original snippet</summary>
-                <pre>{n.snippet}</pre>
-              </details>
-            )}
-          </div>
-        ))}
-        {!filtered.length && (
-          <div className="empty">
-            No notes yet. Select text on any page → use the tooltip.
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty">No notes yet. Select text on any page → use the tooltip.</div>
+      )}
 
       <div className="row">
         <button onClick={exportJSON}>Export JSON</button>

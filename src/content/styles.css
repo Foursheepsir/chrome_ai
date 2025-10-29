@@ -42,6 +42,12 @@
   .ai-tip button:active { 
     transform: translateY(0);
   }
+  .ai-tip button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    filter: grayscale(50%);
+    pointer-events: none;
+  }
   
 /* 结果气泡（常驻，直到点击外部或 Esc） */
 .ai-result-bubble {
