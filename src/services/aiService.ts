@@ -93,8 +93,8 @@ function determineLength(text: string): 'short' | 'medium' | 'long' {
   const wordCount = text.split(/\s+/).length
   
   if (wordCount < 200) return 'short'      // 短文本: <200词 -> 1句摘要
-  if (wordCount < 500) return 'medium'     // 中等文本: 200-500词 -> 3句摘要
-  return 'long'                            // 长文本: >500词 -> 5句摘要
+  if (wordCount < 800) return 'medium'     // 中等文本: 200-800词 -> 3句摘要
+  return 'long'                            // 长文本: >800词 -> 5句摘要
 }
 
 // 获取或创建 Summarizer 实例
@@ -130,7 +130,7 @@ async function getSummarizer(text: string, opts: SummOpts = {}): Promise<Summari
       sharedContext: 'General purpose user-friendly text summarization for web content',
       type: summaryType,
       length: determineLength(text),
-      format: 'plain-text',
+      format: summaryType === 'key-points' ? 'markdown' : 'plain-text',
       expectedInputLanguages: [lang],
       outputLanguage: lang
     }

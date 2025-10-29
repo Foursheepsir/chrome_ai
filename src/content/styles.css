@@ -58,6 +58,19 @@
   word-break: break-word;
 }
 
+/* 气泡内的列表样式 */
+.ai-result-bubble ul {
+  margin: 0 !important;
+  padding-left: 20px !important;
+  list-style-type: disc !important;
+}
+
+.ai-result-bubble li {
+  margin: 6px 0 !important;
+  line-height: 1.5 !important;
+  color: #202124 !important;
+}
+
 .ai-bubble-content {
   margin-bottom: 0;
 }

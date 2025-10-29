@@ -66,7 +66,7 @@ function showResultBubble(
   if (opts?.updateOnly && resultBubbleEl) {
     const content = resultBubbleEl.querySelector('.ai-bubble-content')
     if (content) {
-      content.innerHTML = escapeHtml(markupOrText).replace(/\n/g, '<br/>')
+      content.innerHTML = renderMarkdown(markupOrText)
       return
     }
   }
@@ -79,7 +79,7 @@ function showResultBubble(
   // 内容区域
   const content = document.createElement('div')
   content.className = 'ai-bubble-content'
-  content.innerHTML = escapeHtml(markupOrText).replace(/\n/g, '<br/>')
+  content.innerHTML = renderMarkdown(markupOrText)
   el.appendChild(content)
 
   // 如果提供了保存选项，添加 Save 按钮
@@ -127,6 +127,34 @@ function escapeHtml(str: string) {
   const div = document.createElement('div')
   div.innerText = str
   return div.innerHTML
+}
+
+// 简单的 markdown 渲染（支持列表）
+function renderMarkdown(text: string): string {
+  // 检测是否是 markdown 列表格式
+  const lines = text.split('\n')
+  const isMarkdownList = lines.some(line => /^[-*]\s/.test(line.trim()))
+  
+  if (isMarkdownList) {
+    // 将 markdown 列表转换为 HTML 列表
+    let html = '<ul style="margin: 0; padding-left: 20px;">'
+    lines.forEach(line => {
+      const trimmed = line.trim()
+      if (/^[-*]\s/.test(trimmed)) {
+        // 列表项
+        const content = trimmed.replace(/^[-*]\s/, '')
+        html += `<li>${escapeHtml(content)}</li>`
+      } else if (trimmed) {
+        // 非列表项的文本
+        html += `<li>${escapeHtml(trimmed)}</li>`
+      }
+    })
+    html += '</ul>'
+    return html
+  }
+  
+  // 不是列表，使用普通格式
+  return escapeHtml(text).replace(/\n/g, '<br/>')
 }
 
 /** ---------------- 选区按钮行为 ---------------- */
@@ -446,7 +474,11 @@ function hideSidePanel() {
 }
 
 ensureTooltip()
-ensureFloatingButton()
+
+// 只在顶层框架创建悬浮球和侧边栏（避免 iframe 中重复创建）
+if (window.self === window.top) {
+  ensureFloatingButton()
+}
 
 /* 诊断 Chrome AI API 状态
 ;(async () => {
@@ -456,6 +488,11 @@ ensureFloatingButton()
 
 /** ---------------- 背景消息（右键菜单触发） ---------------- */
 chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
+  // 悬浮球和页面摘要相关消息只在顶层框架处理
+  if (window.self !== window.top) {
+    return false
+  }
+  
   if (msg?.type === 'SHOW_FLOAT_AGAIN') {
     const node = ensureFloatingButton()
     node.style.display = 'block'
