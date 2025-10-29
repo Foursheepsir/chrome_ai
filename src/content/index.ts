@@ -1,5 +1,5 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate, destroySummarizer } from '../services/aiService'
+import { summarize, explain, translate, destroyResources } from '../services/aiService'
 import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
@@ -214,7 +214,8 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
   const buttons = tip?.querySelectorAll('button') as NodeListOf<HTMLButtonElement>
   buttons?.forEach(btn => btn.disabled = true)
 
-  const targetLang = (await getSetting<string>('targetLang')) || 'zh'
+  const targetLang = (await getSetting<string>('targetLang')) || 'en'  // 默认英语
+  console.log('[Content] Target language from storage:', targetLang)
   let kind: Note['kind'] = 'summary'
 
   try {
@@ -224,6 +225,7 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
       // 使用流式更新 - 选中文本用 key-points（要点列表）
       await summarize(selected, {
         type: 'key-points',
+        lang: targetLang,
         onChunk: (chunk) => {
           if (isFirstChunk) {
             // 第一次创建气泡（不显示按钮）
@@ -246,9 +248,27 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
       kind = 'explain'
       showResultBubble(result, { kind, snippet: selected, showActions: true })
     } else if (action === 'tr') {
-      const result = await translate(selected, { targetLang })
+      let isFirstChunk = true
+      
+      // 使用流式更新翻译
+      await translate(selected, { 
+        targetLang,
+        onChunk: (chunk) => {
+          if (isFirstChunk) {
+            // 第一次创建气泡（不显示按钮）
+            showResultBubble(chunk, { kind: 'translation', snippet: selected, showActions: false })
+            isFirstChunk = false
+          } else {
+            // 后续只更新内容
+            showResultBubble(chunk, { kind: 'translation', snippet: selected, updateOnly: true })
+          }
+        }
+      })
+      
+      // 生成完成后，添加保存按钮
+      addSaveButtonToBubble('translation', selected)
+      
       kind = 'translation'
-      showResultBubble(result, { kind, snippet: selected, showActions: true })
     }
   } catch (e) {
     console.error('[AI action error]', e)
@@ -423,8 +443,10 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
       let isFirstChunk = true
       
       // 使用流式更新 - 整页用 tldr（简短概述）
+      const targetLang = (await getSetting<string>('targetLang')) || 'en'
       const res = await summarize(text, {
         type: 'tldr',
+        lang: targetLang,
         onChunk: (chunk) => {
           if (isFirstChunk) {
             // 第一次创建完整结构（不显示按钮）
@@ -570,5 +592,5 @@ chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
 
 // 页面卸载时清理 AI 资源
 window.addEventListener('beforeunload', () => {
-  destroySummarizer()
+  destroyResources()
 })

@@ -4,7 +4,10 @@ type SummOpts = {
   onChunk?: (chunk: string) => void  // 流式更新回调
 }
 type ExplainOpts = { context?: string; lang?: string }
-type TransOpts = { targetLang: string }
+type TransOpts = { 
+  targetLang: string
+  onChunk?: (chunk: string) => void  // 流式更新回调
+}
 
 // 类型声明 - Chrome Summarizer API (最新版本)
 declare global {
@@ -38,10 +41,54 @@ declare global {
     summarizeStreaming(text: string, options?: { context?: string }): AsyncIterable<string>
     destroy(): void
   }
+
+  // 全局 Translator 类
+  const Translator: {
+    availability(options: { sourceLanguage: string; targetLanguage: string }): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>
+    create(options: TranslatorCreateOptions): Promise<Translator>
+  }
+
+  interface TranslatorCreateOptions {
+    sourceLanguage: string
+    targetLanguage: string
+    monitor?: (m: AIDownloadProgressMonitor) => void
+  }
+
+  interface Translator {
+    translate(text: string): Promise<string>
+    translateStreaming(text: string): AsyncIterable<string>
+    destroy(): void
+  }
+
+  // 全局 LanguageDetector 类
+  const LanguageDetector: {
+    availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>
+    create(options?: LanguageDetectorCreateOptions): Promise<LanguageDetector>
+  }
+
+  interface LanguageDetectorCreateOptions {
+    monitor?: (m: AIDownloadProgressMonitor) => void
+  }
+
+  interface LanguageDetector {
+    detect(text: string): Promise<LanguageDetectionResult[]>
+    destroy(): void
+  }
+
+  interface LanguageDetectionResult {
+    detectedLanguage: string
+    confidence: number
+  }
 }
 
 // Summarizer 实例缓存（按 type 分别缓存）
 const summarizerCache: Map<string, Summarizer> = new Map()
+
+// LanguageDetector 实例缓存
+let languageDetectorInstance: LanguageDetector | null = null
+
+// Translator 实例缓存（按语言对缓存）
+const translatorCache: Map<string, Translator> = new Map()
 
 // 检查 Summarizer API 是否可用
 async function checkSummarizerAvailability(): Promise<'available' | 'needs-download' | 'unavailable'> {
@@ -100,11 +147,15 @@ function determineLength(text: string): 'short' | 'medium' | 'long' {
 // 获取或创建 Summarizer 实例
 async function getSummarizer(text: string, opts: SummOpts = {}): Promise<Summarizer | null> {
   try {
-    const lang = opts.lang || 'en'
+    const requestedLang = opts.lang || 'en'
     const type = opts.type || 'tldr'
-    
-    // 使用 type 作为缓存键
-    const cacheKey = type
+
+    // 仅允许 Summarizer 支持的输出语言，其他一律回退到 en
+    const supportedOutputLangs = ['en', 'es', 'ja'] as const
+    const outputLanguage = (supportedOutputLangs as readonly string[]).includes(requestedLang) ? requestedLang : 'en'
+
+    // 缓存键需要包含输出语言，避免复用到不同语言配置的实例
+    const cacheKey = `${type}:${outputLanguage}`
     
     // 如果已有该类型的实例，直接返回
     if (summarizerCache.has(cacheKey)) {
@@ -131,8 +182,8 @@ async function getSummarizer(text: string, opts: SummOpts = {}): Promise<Summari
       type: summaryType,
       length: determineLength(text),
       format: summaryType === 'key-points' ? 'markdown' : 'plain-text',
-      expectedInputLanguages: [lang],
-      outputLanguage: lang
+      outputLanguage : outputLanguage,
+      expectedInputLanguages: ['en', 'ja', 'es']
     }
     
     // 只有需要下载时才添加 monitor
@@ -154,7 +205,7 @@ async function getSummarizer(text: string, opts: SummOpts = {}): Promise<Summari
       length: createOptions.length,
       format: createOptions.format,
       wordCount: text.split(/\s+/).length,
-      lang: createOptions.outputLanguage
+      outputLanguage: createOptions.outputLanguage
     })
     
     const summarizer = await Summarizer.create(createOptions)
@@ -201,7 +252,7 @@ export async function summarize(text: string, opts: SummOpts = {}): Promise<stri
         
         for await (const chunk of stream) {
           
-          // 重要：每个 chunk 是增量内容（新增的 token），需要累积
+          // 每个 chunk 是增量内容（新增的 token），需要累积
           result += chunk
           
           // 如果有回调，实时更新累积结果
@@ -248,68 +299,237 @@ export async function explain(term: string, opts: ExplainOpts = {}): Promise<str
   }
 }
 
+// 获取或创建 LanguageDetector 实例
+async function getLanguageDetector(): Promise<LanguageDetector | null> {
+  try {
+    // 如果已有实例，直接返回
+    if (languageDetectorInstance) {
+      console.log('[AI] Reusing cached LanguageDetector')
+      return languageDetectorInstance
+    }
+
+    // 检查 API 是否存在
+    if (!('LanguageDetector' in self)) {
+      console.log('[AI] ❌ LanguageDetector API not found')
+      return null
+    }
+
+    // 检查可用性
+    const availability = await LanguageDetector.availability()
+    console.log('[AI] LanguageDetector status:', availability)
+
+    if (availability === 'unavailable') {
+      console.log('[AI] ❌ LanguageDetector unavailable')
+      return null
+    }
+
+    // 检查用户激活
+    if (availability === 'downloadable' && !navigator.userActivation.isActive) {
+      console.log('[AI] ⚠️ LanguageDetector download requires user activation')
+      return null
+    }
+
+    console.log('[AI] Creating LanguageDetector instance...')
+    const detector = await LanguageDetector.create()
+    console.log('[AI] ✅ LanguageDetector created successfully')
+
+    // 缓存实例
+    languageDetectorInstance = detector
+    return detector
+  } catch (e) {
+    console.error('[AI] ❌ Failed to create LanguageDetector:', e)
+    return null
+  }
+}
+
+// 检测文本语言
+async function detectLanguage(text: string): Promise<string> {
+  try {
+    const detector = await getLanguageDetector()
+    if (!detector) {
+      console.log('[AI] Using fallback language detection (en)')
+      return 'en'
+    }
+
+    const results = await detector.detect(text)
+    if (results && results.length > 0) {
+      const topResult = results[0]
+      console.log('[AI] Detected language:', topResult.detectedLanguage, 'confidence:', topResult.confidence)
+      return topResult.detectedLanguage
+    }
+
+    console.log('[AI] No detection result, using fallback (en)')
+    return 'en'
+  } catch (e) {
+    console.error('[AI] Language detection error:', e)
+    return 'en'
+  }
+}
+
+// 获取或创建 Translator 实例
+async function getTranslator(sourceLanguage: string, targetLanguage: string): Promise<Translator | null> {
+  try {
+    // 使用语言对作为缓存键
+    const cacheKey = `${sourceLanguage}-${targetLanguage}`
+
+    // 如果已有该语言对的实例，直接返回
+    if (translatorCache.has(cacheKey)) {
+      console.log(`[AI] Reusing cached Translator (${cacheKey})`)
+      return translatorCache.get(cacheKey)!
+    }
+
+    // 检查 API 是否存在
+    if (!('Translator' in self)) {
+      console.log('[AI] ❌ Translator API not found')
+      return null
+    }
+
+    // 检查语言对可用性
+    const availability = await Translator.availability({
+      sourceLanguage,
+      targetLanguage
+    })
+    console.log(`[AI] Translator status (${cacheKey}):`, availability)
+
+    if (availability === 'unavailable') {
+      console.log(`[AI] ❌ Translator unavailable for ${cacheKey}`)
+      return null
+    }
+
+    // 检查用户激活
+    if (availability === 'downloadable' && !navigator.userActivation.isActive) {
+      console.log('[AI] ⚠️ Translator download requires user activation')
+      return null
+    }
+
+    console.log(`[AI] Creating Translator instance (${cacheKey})...`)
+    
+    const createOptions: TranslatorCreateOptions = {
+      sourceLanguage,
+      targetLanguage
+    }
+
+    // 只有需要下载时才添加 monitor
+    if (availability === 'downloadable') {
+      console.log('[AI] Model needs download - adding progress monitor')
+      createOptions.monitor = (m) => {
+        m.addEventListener('downloadprogress', (e) => {
+          const percent = Math.round(e.loaded * 100)
+          console.log(`[AI] Downloading translation model (${cacheKey}): ${percent}%`)
+        })
+      }
+    }
+
+    const translator = await Translator.create(createOptions)
+    console.log(`[AI] ✅ Translator created successfully (${cacheKey})`)
+
+    // 缓存实例
+    translatorCache.set(cacheKey, translator)
+    return translator
+  } catch (e) {
+    console.error('[AI] ❌ Failed to create Translator:', e)
+    return null
+  }
+}
+
+// 降级方案：简单标记
+function fallbackTranslate(text: string, targetLang: string): string {
+  return `[${targetLang}] ${text}`
+}
+
 export async function translate(text: string, opts: TransOpts): Promise<string> {
   try {
-    // Summarizer API 不直接支持翻译，这里使用降级方案
-    // 未来可以集成 Chrome Translation API
-    console.log('[AI] Translation not yet supported by Summarizer API')
-    return `[${opts.targetLang}] ${text}`
+    console.log('[AI] ===== Translation Request =====')
+    console.log('[AI] Target language from settings:', opts.targetLang)
+
+    // 1. 检测源语言
+    console.log('[AI] Detecting source language...')
+    const sourceLanguage = await detectLanguage(text)
+    console.log(`[AI] Detected source language: ${sourceLanguage}`)
+
+    // 2. 如果源语言和目标语言相同，直接返回
+    if (sourceLanguage === opts.targetLang) {
+      console.log('[AI] Source and target languages are the same, returning original text')
+      opts.onChunk?.(text)
+      return text
+    }
+
+    // 3. 获取翻译器
+    console.log(`[AI] Requesting translator for: ${sourceLanguage} -> ${opts.targetLang}`)
+    const translator = await getTranslator(sourceLanguage, opts.targetLang)
+
+    if (!translator) {
+      console.log('[AI] Using fallback translation')
+      const fallback = fallbackTranslate(text, opts.targetLang)
+      opts.onChunk?.(fallback)
+      return fallback
+    }
+
+    // 4. 执行流式翻译
+    console.log('[AI] Using Chrome AI Translator API (streaming)')
+
+    try {
+      const stream = translator.translateStreaming(text)
+      let result = ''
+
+      for await (const chunk of stream) {
+        // 累积内容
+        result += chunk
+
+        // 实时更新
+        if (opts.onChunk) {
+          opts.onChunk(result)
+        }
+      }
+
+      console.log('[AI] ✅ Translation completed')
+      return result
+    } catch (streamError) {
+      console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
+      // 如果流式失败，尝试批量模式
+      const result = await translator.translate(text)
+      opts.onChunk?.(result)
+      return result
+    }
   } catch (e) {
     console.error('[AI] Translation error:', e)
-    return `[${opts.targetLang}] ${text}`
+    const fallback = fallbackTranslate(text, opts.targetLang)
+    opts.onChunk?.(fallback)
+    return fallback
   }
 }
 
 // 清理资源
-export function destroySummarizer() {
-  if (summarizerCache.size > 0) {
-    try {
+export function destroyResources() {
+  try {
+    // 清理 Summarizer 实例
+    if (summarizerCache.size > 0) {
       summarizerCache.forEach((summarizer, type) => {
         summarizer.destroy()
         console.log(`[AI] Destroyed Summarizer (type: ${type})`)
       })
       summarizerCache.clear()
       console.log('[AI] All Summarizer instances destroyed')
-    } catch (e) {
-      console.warn('[AI] Error destroying summarizers:', e)
     }
-  }
-}
 
-// 诊断 AI API 状态
-export async function __diagnoseAI() {
-  console.log('=== Chrome AI Diagnostic ===')
-  console.log('User Agent:', navigator.userAgent)
-  console.log('Chrome Version:', /Chrome\/(\S+)/.exec(navigator.userAgent)?.[1] || 'Unknown')
-  
-  // 复用现有的检查逻辑
-  console.log('\n1. Checking Summarizer availability...')
-  const availability = await checkSummarizerAvailability()
-  
-  if (availability === 'unavailable') {
-    console.log('=== End Diagnostic ===\n')
-    return
-  }
-  
-  // 2. 测试创建实例
-  console.log('\n2. Testing instance creation...')
-  try {
-    console.log('Creating test Summarizer instance with sample text...')
-    const testText = 'This is a test to verify the Summarizer API is working correctly.'
-    const testSummarizer = await Summarizer.create({
-      type: 'tldr',
-      length: determineLength(testText),
-      format: 'plain-text',
-      expectedInputLanguages: ['en'],
-      outputLanguage: 'en'
-    })
-    console.log('✅ Successfully created Summarizer instance!')
-    testSummarizer.destroy()
-    console.log('✅ Cleaned up test instance')
+    // 清理 Translator 实例
+    if (translatorCache.size > 0) {
+      translatorCache.forEach((translator, langPair) => {
+        translator.destroy()
+        console.log(`[AI] Destroyed Translator (${langPair})`)
+      })
+      translatorCache.clear()
+      console.log('[AI] All Translator instances destroyed')
+    }
+
+    // 清理 LanguageDetector 实例
+    if (languageDetectorInstance) {
+      languageDetectorInstance.destroy()
+      languageDetectorInstance = null
+      console.log('[AI] LanguageDetector instance destroyed')
+    }
   } catch (e) {
-    console.error('❌ Failed to create instance:', e)
+    console.warn('[AI] Error destroying AI instances:', e)
   }
-  
-  console.log('\n=== End Diagnostic ===\n')
 }
 

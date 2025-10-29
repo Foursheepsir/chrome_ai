@@ -13,7 +13,16 @@ export default function App() {
     (async () => {
       setNotes(await listNotes())
       const saved = await getSetting<string>('targetLang')
-      if (saved) setLang(saved)
+      if (saved) {
+        setLang(saved)
+        console.log('[Popup] Loaded target language from storage:', saved)
+      } else {
+        // 如果没有保存过，使用默认值 'en' 并保存到 storage
+        const defaultLang = 'en'
+        await setSetting('targetLang', defaultLang)
+        setLang(defaultLang)
+        console.log('[Popup] No saved language, using default:', defaultLang)
+      }
     })()
 
     // 打开 popup 时，让 content 端把悬浮球重新显示到右下角
@@ -101,6 +110,7 @@ export default function App() {
             const v = e.target.value
             setLang(v)
             await setSetting('targetLang', v)
+            console.log('[Popup] Target language changed to:', v)
           }}
         >
           <option value="zh">中文</option>
