@@ -381,6 +381,7 @@ let floatBtnEl: HTMLDivElement | null = null
 let sidePanelEl: HTMLDivElement | null = null
 let sidePanelContentEl: HTMLDivElement | null = null
 let sidePanelOpen = false
+let isGeneratingPageSummary = false  // 防止重复生成页面摘要
 
 function ensureFloatingButton() {
     if (floatBtnEl) return floatBtnEl
@@ -462,9 +463,24 @@ function ensureFloatingButton() {
         await setSetting('floatPos', { left: rect.left, top: rect.top })
         return
       }
-      if (sidePanelOpen) { hideSidePanel(); return }
       
-      // 防止重复点击
+      // 如果侧边栏打开，关闭它
+      if (sidePanelOpen) { 
+        hideSidePanel()
+        return 
+      }
+      
+      // 侧边栏关闭的情况下
+      // 如果正在生成，打开侧边栏显示进度（不重新生成）
+      if (isGeneratingPageSummary) {
+        console.log('[Float Button] Opening panel to show generation progress')
+        ensureSidePanel()
+        sidePanelEl?.classList.add('open')
+        sidePanelOpen = true
+        return
+      }
+      
+      // 没有在生成，防止重复点击启动新的生成
       if (isProcessing) return
       isProcessing = true
       
@@ -493,6 +509,17 @@ function ensureFloatingButton() {
   
 
 async function openPanelAndSummarizePage(forceRefresh = false) {
+    // 如果正在生成，只打开侧边栏显示进度，不重新生成
+    if (isGeneratingPageSummary) {
+      console.log('[AI] Already generating, opening panel to show progress')
+      ensureSidePanel()
+      if (!sidePanelOpen) {
+        sidePanelEl?.classList.add('open')
+        sidePanelOpen = true
+      }
+      return
+    }
+    
     ensureSidePanel()
     showSidePanel('Loading...')
     
@@ -504,10 +531,13 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
         const cached = await getPageSummary(currentUrl)
         if (cached) {
           // 显示缓存的结果
-          renderPageSummary(cached.summary, cached.text, true)
+          renderPageSummary(cached.summary, cached.text)
           return
         }
       }
+      
+      // 设置生成标志
+      isGeneratingPageSummary = true
       
       // 禁用现有按钮（如果有）
       const existingSaveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
@@ -549,41 +579,65 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       await setPageSummary(currentUrl, res, text)
       
       // 显示最终结果和按钮（启用状态）
-      renderPageSummary(res, text, false)
+      renderPageSummary(res, text)
     } catch (e) {
       console.error(e)
       showSidePanel('⚠️ Failed to summarize this page.')
+    } finally {
+      // 重置生成标志
+      isGeneratingPageSummary = false
     }
 }
 
-function renderPageSummary(summary: string, text: string, isCached: boolean) {
+function renderPageSummary(summary: string, text: string) {
   sidePanelContentEl!.innerHTML = `
     <div class="ai-panel-content-wrapper">
       <div class="ai-panel-text">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
     </div>
     <div class="ai-panel-actions">
-      <button id="__ai_save_page_note__" ${isCached ? 'disabled' : ''}>
-        ${isCached ? 'Saved ✓' : 'Save to Notes'}
-      </button>
+      <button id="__ai_save_page_note__">Save to Notes</button>
       <button id="__ai_refresh_summary__">🔄 Refresh</button>
     </div>
   `
   
   const saveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
-  if (!isCached) {
-    saveBtn?.addEventListener('click', async () => {
+  saveBtn?.addEventListener('click', async () => {
+    // 防止重复保存
+    if (saveBtn.disabled) return
+    
+    // 禁用按钮并显示保存状态
+    saveBtn.disabled = true
+    saveBtn.textContent = 'Saving...'
+    
+    try {
       await saveNoteToStore('summary', summary, text.slice(0, 300))
-      if (saveBtn) {
-        saveBtn.textContent = 'Saved ✓'
-        saveBtn.disabled = true
-      }
-    })
-  }
+      saveBtn.textContent = 'Saved ✓'
+    } catch (e) {
+      console.error('[Save error]', e)
+      // 保存失败，恢复按钮状态
+      saveBtn.disabled = false
+      saveBtn.textContent = 'Save to Notes'
+    }
+  })
   
   const refreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
   refreshBtn?.addEventListener('click', async () => {
-    await clearPageSummary(location.href)
-    await openPanelAndSummarizePage(true)
+    // 防止重复生成
+    if (isGeneratingPageSummary) {
+      console.log('[AI] Already generating, ignoring refresh request')
+      return
+    }
+    
+    // 禁用按钮直到生成完成
+    if (refreshBtn) refreshBtn.disabled = true
+    
+    try {
+      await clearPageSummary(location.href)
+      await openPanelAndSummarizePage(true)
+    } finally {
+      // 重新启用按钮
+      if (refreshBtn) refreshBtn.disabled = false
+    }
   })
 }
 
