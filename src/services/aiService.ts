@@ -3,7 +3,11 @@ type SummOpts = {
   type?: 'tldr' | 'key-points' | 'teaser' | 'headline'  // 摘要类型
   onChunk?: (chunk: string) => void  // 流式更新回调
 }
-type ExplainOpts = { context?: string; lang?: string }
+type ExplainOpts = { 
+  context?: string
+  lang?: string
+  onChunk?: (chunk: string) => void  // 流式更新回调
+}
 type TransOpts = { 
   targetLang: string
   onChunk?: (chunk: string) => void  // 流式更新回调
@@ -79,6 +83,46 @@ declare global {
     detectedLanguage: string
     confidence: number
   }
+
+  // 全局 LanguageModel 类 (Prompt API)
+  const LanguageModel: {
+    availability(): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>
+    create(options?: LanguageModelCreateOptions): Promise<LanguageModelSession>
+    params(): Promise<LanguageModelParams>
+  }
+
+  interface LanguageModelParams {
+    defaultTopK: number
+    maxTopK: number
+    defaultTemperature: number
+    maxTemperature: number
+  }
+
+  interface LanguageModelCreateOptions {
+    signal?: AbortSignal
+    monitor?: (m: AIDownloadProgressMonitor) => void
+    systemPrompt?: string
+    initialPrompts?: LanguageModelPrompt[]
+    topK?: number
+    temperature?: number
+    expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>
+    expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>
+  }
+
+  interface LanguageModelPrompt {
+    role: 'system' | 'user' | 'assistant'
+    content: string
+    prefix?: boolean
+  }
+
+  interface LanguageModelSession {
+    prompt(input: string, options?: { signal?: AbortSignal }): Promise<string>
+    promptStreaming(input: string, options?: { signal?: AbortSignal }): AsyncIterable<string>
+    destroy(): void
+    clone(options?: { signal?: AbortSignal }): Promise<LanguageModelSession>
+    inputUsage: number
+    inputQuota: number
+  }
 }
 
 // Summarizer 实例缓存（按 type 分别缓存）
@@ -89,6 +133,15 @@ let languageDetectorInstance: LanguageDetector | null = null
 
 // Translator 实例缓存（按语言对缓存）
 const translatorCache: Map<string, Translator> = new Map()
+
+// LanguageModel 实例缓存（用于 explain 功能）
+// 注意：explain 是单次对话，session 用完即销毁，不需要持久缓存
+let currentExplainSession: LanguageModelSession | null = null
+let currentExplainAbortController: AbortController | null = null
+
+// Keepalive session - 保持模型 loaded，避免每次都重新加载
+// 根据 best practice：空 session 占用内存少，但能保持模型 ready
+let keepaliveSession: LanguageModelSession | null = null
 
 // 检查 Summarizer API 是否可用
 async function checkSummarizerAvailability(): Promise<'available' | 'needs-download' | 'unavailable'> {
@@ -285,17 +338,308 @@ export async function summarize(text: string, opts: SummOpts = {}): Promise<stri
   }
 }
 
-export async function explain(term: string, opts: ExplainOpts = {}): Promise<string> {
+// 检查 LanguageModel (Prompt API) 是否可用
+async function checkLanguageModelAvailability(): Promise<'available' | 'needs-download' | 'unavailable'> {
   try {
-    // TODO: 使用专门的 Explain API (未来实现)
-    // 目前使用降级方案
-    console.log('[AI] Explain feature - using fallback (dedicated API coming soon)')
-    const ctx = opts.context?.slice(0, 300) ?? ''
-    return `"${term}" - ${ctx ? `Context: ${ctx}...` : 'No additional context'}`
+    console.log('[AI] Checking LanguageModel API...')
+    
+    if (!('LanguageModel' in self)) {
+      console.log('[AI] ❌ LanguageModel API not found')
+      console.log('[AI] 💡 Make sure you have:')
+      console.log('[AI]    1. Chrome 128+ (Canary/Dev) or Chrome 138+ (Stable)')
+      console.log('[AI]    2. Enabled flags in chrome://flags:')
+      console.log('[AI]       - #prompt-api-for-gemini-nano')
+      console.log('[AI]       - #optimization-guide-on-device-model')
+      return 'unavailable'
+    }
+    
+    console.log('[AI] ✅ LanguageModel API found')
+    
+    // 检查可用性
+    const status = await LanguageModel.availability()
+    console.log('[AI] LanguageModel status:', status)
+    
+    if (status === 'unavailable') {
+      console.log('[AI] ❌ LanguageModel unavailable (device not supported)')
+      return 'unavailable'
+    }
+    
+    if (status === 'downloadable') {
+      console.log('[AI] ⏳ Model needs download (will auto-download on create())')
+      return 'needs-download'
+    }
+    
+    if (status === 'downloading') {
+      console.log('[AI] ⏳ Model is downloading...')
+      return 'needs-download'
+    }
+    
+    console.log('[AI] ✅ LanguageModel ready!')
+    return 'available'
   } catch (e) {
+    console.warn('[AI] ❌ Error checking LanguageModel availability:', e)
+    return 'unavailable'
+  }
+}
+
+// 创建 keepalive session 保持模型 ready
+// 导出以便 content script 可以在页面加载时调用
+export async function ensureKeepaliveSession() {
+  try {
+    // 如果已有 keepalive session，直接返回
+    if (keepaliveSession) {
+      console.log('[AI] Keepalive session already exists')
+      return
+    }
+    
+    // 先检查可用性
+    const availability = await checkLanguageModelAvailability()
+    if (availability === 'unavailable') {
+      console.log('[AI] Cannot create keepalive session - model unavailable')
+      return
+    }
+    
+    console.log('[AI] Creating keepalive session to keep model ready...')
+    
+    // 创建一个最小配置的 session
+    // 使用与 explain 相同的 expectedInputs/expectedOutputs 以确保一致性
+    keepaliveSession = await LanguageModel.create({
+      topK: 1,
+      temperature: 1,
+      expectedInputs: [
+        { type: 'text', languages: ['en', 'ja', 'es'] }
+      ],
+      expectedOutputs: [
+        { type: 'text', languages: ['en', 'ja', 'es'] }
+      ]
+    })
+    
+    console.log('[AI] ✅ Keepalive session created - model stays ready')
+  } catch (e) {
+    console.warn('[AI] Failed to create keepalive session:', e)
+  }
+}
+
+// 销毁 keepalive session
+function destroyKeepaliveSession() {
+  try {
+    if (keepaliveSession) {
+      keepaliveSession.destroy()
+      keepaliveSession = null
+      console.log('[AI] Keepalive session destroyed')
+    }
+  } catch (e) {
+    console.warn('[AI] Error destroying keepalive session:', e)
+  }
+}
+
+// 清理当前的 explain session
+export function destroyExplainSession() {
+  try {
+    // 如果有正在进行的请求，先 abort
+    if (currentExplainAbortController) {
+      currentExplainAbortController.abort()
+      currentExplainAbortController = null
+      console.log('[AI] Aborted ongoing explain request')
+    }
+    
+    // 销毁 session
+    if (currentExplainSession) {
+      currentExplainSession.destroy()
+      currentExplainSession = null
+      console.log('[AI] Explain session destroyed')
+    }
+  } catch (e) {
+    console.warn('[AI] Error destroying explain session:', e)
+  }
+}
+
+// 清理输入文本，防止模型报错
+function cleanTextInput(text: string): string {
+  // 移除过多的空白和特殊字符
+  return text
+    .replace(/\s+/g, ' ')  // 多个空白符替换为单个空格
+    .replace(/[\x00-\x1F\x7F-\x9F]/g, '')  // 移除控制字符
+    .trim()
+    .slice(0, 2000)  // 限制长度，避免超出 quota
+}
+
+// 降级方案：简单解释
+function fallbackExplain(term: string, context?: string): string {
+  const ctx = context?.slice(0, 300) ?? ''
+  return `"${term}"${ctx ? ` - Context: ${ctx}...` : ''}\n\n(Explanation unavailable - AI model not ready, please refresh the page and try again.)`
+}
+
+export async function explain(term: string, opts: ExplainOpts = {}): Promise<string> {
+  // 先清理之前的 session（如果有）
+  destroyExplainSession()
+  
+  const optsWithDefaults: ExplainOpts = {
+    lang: 'en',
+    ...opts
+  }
+  
+  try {
+    console.log('[AI] ===== Explain Request =====')
+    console.log('[AI] Term:', term)
+    console.log('[AI] Output language:', optsWithDefaults.lang)
+    
+    // 清理输入
+    const cleanedTerm = cleanTextInput(term)
+    
+    // 检查清理后的内容长度
+    if (cleanedTerm.length < 3) {
+      const errorMsg = '⚠️ Selected content is too short or invalid. Please select something else and try again.'
+      console.warn('[AI] ❌ Invalid input: cleaned term length =', cleanedTerm.length)
+      console.warn('[AI] Original term:', term)
+      console.warn('[AI] Cleaned term:', cleanedTerm)
+      optsWithDefaults.onChunk?.(errorMsg)
+      return errorMsg
+    }
+    
+    const cleanedContext = opts.context ? cleanTextInput(opts.context) : ''
+    
+    // 检查可用性
+    const availability = await checkLanguageModelAvailability()
+    if (availability === 'unavailable') {
+      const fallback = fallbackExplain(term, opts.context)
+      optsWithDefaults.onChunk?.(fallback)
+      return fallback
+    }
+    
+    // 检查用户激活（首次下载模型时需要）
+    if (availability === 'needs-download' && !navigator.userActivation.isActive) {
+      console.log('[AI] ⚠️ Model download requires user activation')
+      const fallback = fallbackExplain(term, opts.context)
+      optsWithDefaults.onChunk?.(fallback)
+      return fallback
+    }
+    
+    // 如果模型可用但没有任何 session，先创建 keepalive 以保持模型 ready
+    // 这样后续调用就不需要重新加载模型
+    if (availability === 'available' && !keepaliveSession && !currentExplainSession) {
+      console.log('[AI] First time use - creating keepalive session')
+      await ensureKeepaliveSession()
+    }
+    
+    // 销毁 keepalive session，为实际工作的 session 腾出资源
+    destroyKeepaliveSession()
+    
+    // 创建 AbortController
+    currentExplainAbortController = new AbortController()
+    
+    // 获取默认参数
+    const params = await LanguageModel.params()
+    console.log('[AI] Model params:', params)
+    
+    // 构建 system prompt（引导模型输出不超过3句话的简洁解释）
+    const systemPrompt = `You are a helpful assistant that explains terms and concepts clearly and concisely. 
+Always provide explanations in exactly 3 sentences or less. 
+Be accurate, helpful, and consider the context provided.
+Output language: ${optsWithDefaults.lang}.`
+    
+    // 构建 user prompt
+    let userPrompt = `Explain: "${cleanedTerm}"`
+    if (cleanedContext) {
+      userPrompt += `\n\nContext: ${cleanedContext}`
+    }
+    userPrompt += `\n\nProvide a clear, concise explanation in ${optsWithDefaults.lang} (maximum 3 sentences).`
+    
+    console.log('[AI] User prompt:', userPrompt)
+    
+    // 创建配置
+    const createOptions: LanguageModelCreateOptions = {
+      signal: currentExplainAbortController.signal,
+      topK: params.defaultTopK,
+      temperature: params.defaultTemperature,
+      initialPrompts: [
+        { role: 'system', content: systemPrompt }
+      ],
+      expectedInputs: [
+        { type: 'text', languages: ['en', 'ja', 'es'] }
+      ],
+      expectedOutputs: [
+        { type: 'text', languages: [optsWithDefaults.lang || 'en'] }
+      ]
+    }
+    
+    // 只有需要下载时才添加 monitor
+    if (availability === 'needs-download') {
+      console.log('[AI] Model needs download - adding progress monitor')
+      createOptions.monitor = (m) => {
+        m.addEventListener('downloadprogress', (e) => {
+          const percent = Math.round(e.loaded * 100)
+          console.log(`[AI] Downloading model: ${percent}%`)
+        })
+      }
+    }
+    
+    console.log('[AI] Creating LanguageModel session...')
+    currentExplainSession = await LanguageModel.create(createOptions)
+    console.log('[AI] ✅ Session created successfully')
+    
+    // 使用流式 API - 官方推荐的 for await of 语法（与 summarizer/translator 一致）
+    console.log('[AI] Starting streaming explanation...')
+    
+    try {
+      const stream = currentExplainSession.promptStreaming(userPrompt, {
+        signal: currentExplainAbortController.signal
+      })
+      let result = ''
+      
+      for await (const chunk of stream) {
+        // 每个 chunk 是增量内容（新增的 token），需要累积
+        result += chunk
+        
+        // 如果有回调，实时更新累积结果
+        if (optsWithDefaults.onChunk) {
+          optsWithDefaults.onChunk(result)
+        }
+      }
+      
+      console.log('[AI] ✅ Explanation completed')
+      console.log('[AI] Result length:', result.length)
+      
+      return result
+    } catch (streamError) {
+      console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
+      // 如果流式失败，尝试批量模式
+      const result = await currentExplainSession.prompt(userPrompt, {
+        signal: currentExplainAbortController.signal
+      })
+      optsWithDefaults.onChunk?.(result)
+      return result
+    }
+  } catch (e: any) {
     console.error('[AI] Explain error:', e)
-  const ctx = opts.context?.slice(0, 300) ?? ''
-    return `"${term}" - ${ctx ? `Context: ${ctx}...` : 'No context available'}`
+    
+    // 检查是否是 abort
+    if (e.name === 'AbortError') {
+      console.log('[AI] Explain was aborted')
+      return ''
+    }
+    
+    // 检查是否是 NotSupportedError
+    if (e.name === 'NotSupportedError') {
+      const errorMsg = '⚠️ Unsupported input or output detected. Please try different content or check your language settings.'
+      console.error('[AI] NotSupportedError:', e.message)
+      optsWithDefaults.onChunk?.(errorMsg)
+      return errorMsg
+    }
+    
+    // 其他错误使用降级方案
+    const fallback = fallbackExplain(term, opts.context)
+    optsWithDefaults.onChunk?.(fallback)
+    return fallback
+  } finally {
+    // 清理资源
+    destroyExplainSession()
+    
+    // 重新创建 keepalive session 保持模型 ready
+    // 使用 setTimeout 避免阻塞当前流程
+    setTimeout(() => {
+      ensureKeepaliveSession()
+    }, 100)
   }
 }
 
@@ -535,6 +879,12 @@ export function destroyResources() {
       languageDetectorInstance = null
       console.log('[AI] LanguageDetector instance destroyed')
     }
+
+    // 清理 Explain session
+    destroyExplainSession()
+    
+    // 清理 Keepalive session
+    destroyKeepaliveSession()
   } catch (e) {
     console.warn('[AI] Error destroying AI instances:', e)
   }

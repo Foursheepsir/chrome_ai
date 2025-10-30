@@ -1,12 +1,63 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate, destroyResources } from '../services/aiService'
+import { summarize, explain, translate, destroyResources, destroyExplainSession, ensureKeepaliveSession } from '../services/aiService'
 import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 
 /** ---------------- Tooltip（选区操作条） ---------------- */
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+// 提取选区的上下文（用于 explain）
+// 注意：此函数只在选中内容≤4个词时被调用
+function getContextForExplain(selectedText: string): string {
+  try {
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return selectedText
+    
+    const range = selection.getRangeAt(0)
+    const container = range.commonAncestorContainer
+    
+    // 获取包含选区的文本节点的父元素
+    const parentElement = container.nodeType === Node.TEXT_NODE 
+      ? container.parentElement 
+      : container as Element
+    
+    if (!parentElement) return selectedText
+    
+    // 获取父元素的完整文本
+    const fullText = parentElement.textContent || ''
+    
+    // 找到选中文本在完整文本中的位置
+    const selectionStart = fullText.indexOf(selectedText)
+    if (selectionStart === -1) return selectedText
+    
+    // 提取前后文本
+    const beforeText = fullText.substring(0, selectionStart)
+    const afterText = fullText.substring(selectionStart + selectedText.length)
+    
+    // 提取前一句话（找最后一个句号、问号、感叹号或换行）
+    const sentenceEndRegex = /[.!?\n]/
+    const beforeSentences = beforeText.split(sentenceEndRegex)
+    const prevSentence = beforeSentences.length > 0 
+      ? beforeSentences[beforeSentences.length - 1].trim() 
+      : ''
+    
+    // 提取后一句话（找第一个句号、问号、感叹号或换行）
+    const nextSentenceMatch = afterText.match(/^[^.!?\n]+[.!?\n]?/)
+    const nextSentence = nextSentenceMatch ? nextSentenceMatch[0].trim() : ''
+    
+    // 组合：前一句 + 选中内容 + 后一句
+    const context = [
+      prevSentence,
+      selectedText,
+      nextSentence
+    ].filter(s => s.length > 0).join(' ')
+    
+    return context
+  } catch (e) {
+    console.warn('[Context extraction error]', e)
+    return selectedText
+  }
+}
 
 let lastSelectionRect: DOMRect | null = null
 let resultBubbleEl: HTMLDivElement | null = null
@@ -54,6 +105,9 @@ document.addEventListener('mouseup', () => {
 /** ---------------- 结果气泡（常驻，直到点击外部或按 Esc） ---------------- */
 
 function hideResultBubble() {
+  // 清理 explain session（如果正在进行）
+  destroyExplainSession()
+  
   resultBubbleEl?.remove()
   resultBubbleEl = null
 }
@@ -216,7 +270,6 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
 
   const targetLang = (await getSetting<string>('targetLang')) || 'en'  // 默认英语
   console.log('[Content] Target language from storage:', targetLang)
-  let kind: Note['kind'] = 'summary'
 
   try {
     if (action === 'summ') {
@@ -235,13 +288,36 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
       
       // 生成完成后，添加保存按钮
       addSaveButtonToBubble('summary', selected)
-      
-      kind = 'summary'
     } else if (action === 'exp') {
-      const ctx = window.getSelection()?.anchorNode?.parentElement?.textContent ?? selected
-      const result = await explain(selected, { context: ctx })
-      kind = 'explain'
-      showResultBubble(result, { kind, snippet: selected, showActions: true })
+      // 先显示加载提示
+      showResultBubble('Generating explanation...', { showActions: false })
+      
+      // 检查词数，只有 ≤4 个词时才提取上下文
+      const wordCount = selected.trim().split(/\s+/).length
+      console.log('[Content] Selected text word count:', wordCount)
+      
+      let context: string | undefined
+      if (wordCount <= 4) {
+        // 短语：提取前后各一句话作为上下文
+        context = getContextForExplain(selected)
+        console.log('[Content] Short phrase detected - extracting context:', context)
+      } else {
+        // 长文本：不需要额外上下文
+        console.log('[Content] Long text detected - no additional context needed')
+      }
+      
+      // 使用流式更新
+      await explain(selected, {
+        context,
+        lang: targetLang,
+        onChunk: (chunk) => {
+          // 直接更新内容
+          showResultBubble(chunk, { kind: 'explain', snippet: selected, updateOnly: true })
+        }
+      })
+      
+      // 生成完成后，添加保存按钮
+      addSaveButtonToBubble('explain', selected)
     } else if (action === 'tr') {
       // 先显示加载提示
       showResultBubble('Translating...', { showActions: false })
@@ -257,8 +333,6 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
       
       // 生成完成后，添加保存按钮
       addSaveButtonToBubble('translation', selected)
-      
-      kind = 'translation'
     }
   } catch (e) {
     console.error('[AI action error]', e)
@@ -380,7 +454,7 @@ function ensureFloatingButton() {
       
       icon.classList.add('spinning')
       try {
-        await openPanelAndSummarizePage(/* withDelay */ true)
+        await openPanelAndSummarizePage()
       } finally {
         icon.classList.remove('spinning')
         isProcessing = false
@@ -402,7 +476,7 @@ function ensureFloatingButton() {
 }
   
 
-async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false) {
+async function openPanelAndSummarizePage(forceRefresh = false) {
     ensureSidePanel()
     showSidePanel('Loading...')
     
@@ -428,7 +502,6 @@ async function openPanelAndSummarizePage(withDelay = false, forceRefresh = false
       // 生成新的摘要
       showSidePanel('Generating summary...')
       const text = extractReadableText(document)
-      if (withDelay) await sleep(1000)
       
       let isFirstChunk = true
       
@@ -494,7 +567,7 @@ function renderPageSummary(summary: string, text: string, isCached: boolean) {
   const refreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
   refreshBtn?.addEventListener('click', async () => {
     await clearPageSummary(location.href)
-    await openPanelAndSummarizePage(false, true)
+    await openPanelAndSummarizePage(true)
   })
 }
 
@@ -546,6 +619,14 @@ ensureTooltip()
 // 只在顶层框架创建悬浮球和侧边栏（避免 iframe 中重复创建）
 if (window.self === window.top) {
   ensureFloatingButton()
+  
+  // 预加载 keepalive session 以保持 LanguageModel ready
+  // 延迟 2 秒避免影响页面初始加载性能
+  setTimeout(() => {
+    ensureKeepaliveSession().catch(err => {
+      console.log('[AI] Background keepalive session creation skipped:', err.message)
+    })
+  }, 2000)
 }
 
 /* 诊断 Chrome AI API 状态
