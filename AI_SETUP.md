@@ -21,7 +21,7 @@
    
    - **Summarization API for Gemini Nano**
      - Flag: `#summarization-api-for-gemini-nano`
-     - 设置为: `Enabled`
+     - 设置为: `Enabled Multilingual`
    
    - **Optimization Guide On Device Model**
      - Flag: `#optimization-guide-on-device-model`

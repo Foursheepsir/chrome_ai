@@ -139,6 +139,10 @@ const translatorCache: Map<string, Translator> = new Map()
 let currentExplainSession: LanguageModelSession | null = null
 let currentExplainAbortController: AbortController | null = null
 
+// Summarize 和 Translate 的中止标志（用于终止流式生成）
+let shouldAbortSummarize = false
+let shouldAbortTranslate = false
+
 // Keepalive session - 保持模型 loaded，避免每次都重新加载
 // 根据 best practice：空 session 占用内存少，但能保持模型 ready
 let keepaliveSession: LanguageModelSession | null = null
@@ -280,15 +284,42 @@ function fallbackSummarize(text: string): string {
   const MAX_WORDS = 150
   const words = text.split(/\s+/)
   const truncated = words.slice(0, MAX_WORDS).join(' ')
-  return truncated + (words.length > MAX_WORDS ? '...' : '')
+  const troubleshooting = `
+
+⚠️ Summarization unavailable - AI model not ready. Please refresh the page and try again later.
+
+Quick Setup Guide:
+1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)
+2. Enable flags in chrome://flags:
+   • #summarization-api-for-gemini-nano → Enabled Multilingual
+   • #optimization-guide-on-device-model → Enabled BypassPerfRequirement
+3. Restart browser
+4. Download model at chrome://components (Optimization Guide On Device Model)
+5. Requirements: 22GB disk space, 4GB+ GPU or 16GB+ RAM
+
+Learn more: https://developer.chrome.com/docs/ai/built-in-apis`
+  
+  return truncated + (words.length > MAX_WORDS ? '...' : '') + troubleshooting
 }
 
 export async function summarize(text: string, opts: SummOpts = {}): Promise<string> {
+  // 重置中止标志
+  shouldAbortSummarize = false
+  
   // 确保语言和类型参数有默认值
   const optsWithDefaults: SummOpts = {
     lang: 'en',
     type: 'tldr',  // 默认 tldr
     ...opts  // 调用时传递的 opts 会覆盖默认值
+  }
+  
+  // 检查文本长度（至少10个词）
+  const wordCount = text.trim().split(/\s+/).length
+  if (wordCount < 10) {
+    const warningMsg = '⚠️ Selected content is too short for summarization. Please select at least 10 words.'
+    console.warn('[AI] ❌ Text too short for summarization: only', wordCount, 'words')
+    optsWithDefaults.onChunk?.(warningMsg)
+    return warningMsg
   }
   
   try {
@@ -304,6 +335,11 @@ export async function summarize(text: string, opts: SummOpts = {}): Promise<stri
         let result = ''
         
         for await (const chunk of stream) {
+          // 检查是否应该终止
+          if (shouldAbortSummarize) {
+            console.log('[AI] Summarize was aborted')
+            return ''
+          }
           
           // 每个 chunk 是增量内容（新增的 token），需要累积
           result += chunk
@@ -318,6 +354,13 @@ export async function summarize(text: string, opts: SummOpts = {}): Promise<stri
         return result
       } catch (streamError) {
         console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
+        
+        // 如果已经被终止，直接返回
+        if (shouldAbortSummarize) {
+          console.log('[AI] Summarize was aborted')
+          return ''
+        }
+        
         // 如果流式失败，尝试批量模式
         const result = await summarizer.summarize(text)
         optsWithDefaults.onChunk?.(result)
@@ -454,6 +497,18 @@ export function destroyExplainSession() {
   }
 }
 
+// 终止当前的 summarize 操作
+export function abortSummarize() {
+  shouldAbortSummarize = true
+  console.log('[AI] Requested to abort summarize')
+}
+
+// 终止当前的 translate 操作
+export function abortTranslate() {
+  shouldAbortTranslate = true
+  console.log('[AI] Requested to abort translate')
+}
+
 // 清理输入文本，防止模型报错
 function cleanTextInput(text: string): string {
   // 移除过多的空白和特殊字符
@@ -467,7 +522,22 @@ function cleanTextInput(text: string): string {
 // 降级方案：简单解释
 function fallbackExplain(term: string, context?: string): string {
   const ctx = context?.slice(0, 300) ?? ''
-  return `"${term}"${ctx ? ` - Context: ${ctx}...` : ''}\n\n(Explanation unavailable - AI model not ready, please refresh the page and try again.)`
+  const troubleshooting = `
+
+⚠️ Explanation unavailable - AI model not ready. Please refresh the page and try again later.
+
+Quick Setup Guide:
+1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)
+2. Enable flags in chrome://flags:
+   • #prompt-api-for-gemini-nano → Enabled Multilingual
+   • #optimization-guide-on-device-model → Enabled BypassPerfRequirement
+3. Restart browser
+4. Download model at chrome://components (Optimization Guide On Device Model)
+5. Requirements: 22GB disk space, 4GB+ GPU or 16GB+ RAM
+
+Learn more: https://developer.chrome.com/docs/ai/built-in-apis`
+  
+  return `"${term}"${ctx ? ` - Context: ${ctx}...` : ''}${troubleshooting}`
 }
 
 export async function explain(term: string, opts: ExplainOpts = {}): Promise<string> {
@@ -515,15 +585,13 @@ export async function explain(term: string, opts: ExplainOpts = {}): Promise<str
       return fallback
     }
     
-    // 如果模型可用但没有任何 session，先创建 keepalive 以保持模型 ready
-    // 这样后续调用就不需要重新加载模型
-    if (availability === 'available' && !keepaliveSession && !currentExplainSession) {
-      console.log('[AI] First time use - creating keepalive session')
-      await ensureKeepaliveSession()
+    // 如果有 keepalive session，销毁它为新 session 腾出资源
+    if (keepaliveSession) {
+      console.log('[AI] Destroying keepalive session to make room for explain session')
+      destroyKeepaliveSession()
+      // 等待一小段时间让资源释放
+      await new Promise(resolve => setTimeout(resolve, 50))
     }
-    
-    // 销毁 keepalive session，为实际工作的 session 腾出资源
-    destroyKeepaliveSession()
     
     // 创建 AbortController
     currentExplainAbortController = new AbortController()
@@ -576,6 +644,15 @@ Output language: ${optsWithDefaults.lang}.`
     
     console.log('[AI] Creating LanguageModel session...')
     currentExplainSession = await LanguageModel.create(createOptions)
+    
+    // 验证 session 创建成功
+    if (!currentExplainSession) {
+      console.error('[AI] ❌ Failed to create session - returned null')
+      const fallback = fallbackExplain(term, opts.context)
+      optsWithDefaults.onChunk?.(fallback)
+      return fallback
+    }
+    
     console.log('[AI] ✅ Session created successfully')
     
     // 使用流式 API - 官方推荐的 for await of 语法（与 summarizer/translator 一致）
@@ -603,12 +680,27 @@ Output language: ${optsWithDefaults.lang}.`
       return result
     } catch (streamError) {
       console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
-      // 如果流式失败，尝试批量模式
-      const result = await currentExplainSession.prompt(userPrompt, {
-        signal: currentExplainAbortController.signal
-      })
-      optsWithDefaults.onChunk?.(result)
-      return result
+      
+      // 检查 session 是否仍然有效
+      if (!currentExplainSession) {
+        console.error('[AI] Session is null, cannot retry with non-streaming')
+        throw streamError
+      }
+      
+      // 创建新的 AbortController，避免使用已中止的 signal
+      const retryAbortController = new AbortController()
+      
+      try {
+        // 如果流式失败，尝试批量模式
+        const result = await currentExplainSession.prompt(userPrompt, {
+          signal: retryAbortController.signal
+        })
+        optsWithDefaults.onChunk?.(result)
+        return result
+      } catch (promptError) {
+        console.error('[AI] Non-streaming also failed:', promptError)
+        throw promptError
+      }
     }
   } catch (e: any) {
     console.error('[AI] Explain error:', e)
@@ -785,10 +877,28 @@ async function getTranslator(sourceLanguage: string, targetLanguage: string): Pr
 
 // 降级方案：简单标记
 function fallbackTranslate(text: string, targetLang: string): string {
-  return `[${targetLang}] ${text}`
+  const troubleshooting = `
+
+⚠️ Translation unavailable - AI model not ready. Please refresh the page and try again later.
+
+Quick Setup Guide:
+1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)
+2. Enable flags in chrome://flags:
+   • #translation-api → Enabled
+   • #optimization-guide-on-device-model → Enabled BypassPerfRequirement
+3. Restart browser
+4. Download model at chrome://components (Optimization Guide On Device Model)
+5. Requirements: 22GB disk space, 4GB+ GPU or 16GB+ RAM
+
+Learn more: https://developer.chrome.com/docs/ai/built-in-apis`
+  
+  return `[${targetLang}] ${text}${troubleshooting}`
 }
 
 export async function translate(text: string, opts: TransOpts): Promise<string> {
+  // 重置中止标志
+  shouldAbortTranslate = false
+  
   try {
     console.log('[AI] ===== Translation Request =====')
     console.log('[AI] Target language from settings:', opts.targetLang)
@@ -824,6 +934,12 @@ export async function translate(text: string, opts: TransOpts): Promise<string> 
       let result = ''
 
       for await (const chunk of stream) {
+        // 检查是否应该终止
+        if (shouldAbortTranslate) {
+          console.log('[AI] Translate was aborted')
+          return ''
+        }
+        
         // 累积内容
         result += chunk
 
@@ -837,6 +953,13 @@ export async function translate(text: string, opts: TransOpts): Promise<string> 
       return result
     } catch (streamError) {
       console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
+      
+      // 如果已经被终止，直接返回
+      if (shouldAbortTranslate) {
+        console.log('[AI] Translate was aborted')
+        return ''
+      }
+      
       // 如果流式失败，尝试批量模式
       const result = await translator.translate(text)
       opts.onChunk?.(result)
@@ -880,6 +1003,10 @@ export function destroyResources() {
       console.log('[AI] LanguageDetector instance destroyed')
     }
 
+    // 中止所有进行中的操作
+    abortSummarize()
+    abortTranslate()
+    
     // 清理 Explain session
     destroyExplainSession()
     

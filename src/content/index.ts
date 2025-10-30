@@ -1,5 +1,5 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate, destroyResources, destroyExplainSession, ensureKeepaliveSession } from '../services/aiService'
+import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession } from '../services/aiService'
 import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
@@ -105,7 +105,9 @@ document.addEventListener('mouseup', () => {
 /** ---------------- 结果气泡（常驻，直到点击外部或按 Esc） ---------------- */
 
 function hideResultBubble() {
-  // 清理 explain session（如果正在进行）
+  // 中止所有正在进行的 AI 操作
+  abortSummarize()
+  abortTranslate()
   destroyExplainSession()
   
   resultBubbleEl?.remove()
@@ -217,8 +219,11 @@ function escapeHtml(str: string) {
 
 // 简单的 markdown 渲染（支持列表）
 function renderMarkdown(text: string): string {
+  // 先去除首尾空白，避免多余的空行
+  const trimmedText = text.trim()
+  
   // 检测是否是 markdown 列表格式
-  const lines = text.split('\n')
+  const lines = trimmedText.split('\n')
   const isMarkdownList = lines.some(line => /^[-*]\s/.test(line.trim()))
   
   if (isMarkdownList) {
@@ -240,7 +245,7 @@ function renderMarkdown(text: string): string {
   }
   
   // 不是列表，使用普通格式
-  return escapeHtml(text).replace(/\n/g, '<br/>')
+  return escapeHtml(trimmedText).replace(/\n/g, '<br/>')
 }
 
 /** ---------------- 选区按钮行为 ---------------- */
@@ -277,7 +282,7 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
       showResultBubble('Generating summary...', { showActions: false })
       
       // 使用流式更新 - 选中文本用 key-points（要点列表）
-      await summarize(selected, {
+      const result = await summarize(selected, {
         type: 'key-points',
         lang: targetLang,
         onChunk: (chunk) => {
@@ -286,38 +291,49 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
         }
       })
       
-      // 生成完成后，添加保存按钮
-      addSaveButtonToBubble('summary', selected)
+      // 生成完成后，只在非警告消息时添加保存按钮
+      // 警告消息以 ⚠️ 开头
+      if (result && !result.startsWith('⚠️')) {
+        addSaveButtonToBubble('summary', selected)
+      }
     } else if (action === 'exp') {
       // 先显示加载提示
       showResultBubble('Generating explanation...', { showActions: false })
       
-      // 检查词数，只有 ≤4 个词时才提取上下文
-      const wordCount = selected.trim().split(/\s+/).length
-      console.log('[Content] Selected text word count:', wordCount)
-      
-      let context: string | undefined
-      if (wordCount <= 4) {
-        // 短语：提取前后各一句话作为上下文
-        context = getContextForExplain(selected)
-        console.log('[Content] Short phrase detected - extracting context:', context)
-      } else {
-        // 长文本：不需要额外上下文
-        console.log('[Content] Long text detected - no additional context needed')
-      }
-      
-      // 使用流式更新
-      await explain(selected, {
-        context,
-        lang: targetLang,
-        onChunk: (chunk) => {
-          // 直接更新内容
-          showResultBubble(chunk, { kind: 'explain', snippet: selected, updateOnly: true })
+      try {
+        // 检查词数，只有 ≤4 个词时才提取上下文
+        const wordCount = selected.trim().split(/\s+/).length
+        console.log('[Content] Selected text word count:', wordCount)
+        
+        let context: string | undefined
+        if (wordCount <= 4) {
+          // 短语：提取前后各一句话作为上下文
+          context = getContextForExplain(selected)
+          console.log('[Content] Short phrase detected - extracting context:', context)
+        } else {
+          // 长文本：不需要额外上下文
+          console.log('[Content] Long text detected - no additional context needed')
         }
-      })
-      
-      // 生成完成后，添加保存按钮
-      addSaveButtonToBubble('explain', selected)
+        
+        // 使用流式更新
+        const result = await explain(selected, {
+          context,
+          lang: targetLang,
+          onChunk: (chunk) => {
+            // 直接更新内容
+            showResultBubble(chunk, { kind: 'explain', snippet: selected, updateOnly: true })
+          }
+        })
+        
+        // 如果结果是空的（可能被中止），不添加保存按钮
+        if (result && result.trim()) {
+          // 生成完成后，添加保存按钮
+          addSaveButtonToBubble('explain', selected)
+        }
+      } catch (explainError) {
+        console.error('[Content] Explain error:', explainError)
+        showResultBubble('⚠️ Failed to generate explanation. Please refresh the page and try again later.')
+      }
     } else if (action === 'tr') {
       // 先显示加载提示
       showResultBubble('Translating...', { showActions: false })
@@ -336,7 +352,7 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
     }
   } catch (e) {
     console.error('[AI action error]', e)
-    showResultBubble('⚠️ Failed. Please try again.')
+    showResultBubble('⚠️ Failed to generate result. Please refresh the page and try again later.')
   } finally {
     // 重新启用 tooltip 的所有按钮
     buttons?.forEach(btn => btn.disabled = false)
