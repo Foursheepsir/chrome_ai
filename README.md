@@ -5,7 +5,7 @@
 </p>
 <h3 align="center"><b>Private, on‑device AI only for you</b></h3>
 <h4 align="center">Summarize • Translate • Explain • Page Chat • Save Notes</h4>
-<h4 align="center">— all locally with Chrome Built‑in AI -</h4>
+<h4 align="center">— all locally with Chrome Built‑in AI —</h4>
 
 
 Instructions to install, run and evaluate this Chrome Extension from a clean environment.
