@@ -286,14 +286,14 @@ async function getSummarizer(text: string, opts: SummOpts = {}): Promise<Summari
 
 // 降级方案：简单文本摘要
 function fallbackSummarize(text: string): string {
-  const MAX_WORDS = 150
+  const MAX_WORDS = 100
   const words = text.split(/\s+/)
   const truncated = words.slice(0, MAX_WORDS).join(' ')
   const troubleshooting = `
 
-⚠️ Summarization unavailable - AI model not ready or language not supported. Please refresh the page and try again later.
+⚠️ Summarization unavailable - AI model not ready or language not supported. Please refresh the page and try again later, and also check your console for more details.
 
-We currently only support English, Japanese, and Spanish. More languages will be supported in the future.
+We currently only support English, Japanese, and Spanish. More languages are on the way.
 
 Quick Setup Guide:
 1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)
@@ -531,9 +531,9 @@ function fallbackExplain(term: string, context?: string): string {
   const ctx = context?.slice(0, 300) ?? ''
   const troubleshooting = `
 
-⚠️ Explanation unavailable - AI model not ready or language not supported. Please refresh the page and try again later.
+⚠️ Explanation unavailable - AI model not ready or language not supported. Please refresh the page and try again later, and also check your console for more details.
 
-We currently only support English, Japanese, and Spanish. More languages will be supported in the future.
+We currently only support English, Japanese, and Spanish. More languages are on the way.
 
 Quick Setup Guide:
 1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)
@@ -895,14 +895,14 @@ async function getTranslator(sourceLanguage: string, targetLanguage: string): Pr
 function fallbackTranslate(text: string, targetLang: string): string {
   const troubleshooting = `
 
-⚠️ Translation unavailable - AI model not ready or language not supported. Please refresh the page and try again later.
+⚠️ Translation unavailable - AI model not ready or language not supported. Please refresh the page and try again later, and also check your console for more details.
 
-We currently only support English, Japanese, and Spanish. More languages will be supported in the future.
+We currently only support English, Japanese, and Spanish. More languages are on the way.
 
 Quick Setup Guide:
 1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)
 2. Enable flags in chrome://flags:
-   • #translation-api → Enabled
+   • #translation-api → Enabled without language pack limit
    • #optimization-guide-on-device-model → Enabled BypassPerfRequirement
 3. Restart browser
 4. Download model at chrome://components (Optimization Guide On Device Model)
@@ -1204,18 +1204,25 @@ export async function askPageQuestion(question: string, opts: { lang?: string; o
       return ''
     }
     
+    const troubleshooting = `
+
+⚠️ Chat unavailable - Language not supported or model not ready. Please check your console for more details and try again.
+
+We currently only support English, Japanese, and Spanish. More languages are on the way.
+
+Learn more: https://developer.chrome.com/docs/ai/built-in-apis
+`
+
     // 检查是否是 NotSupportedError
     if (e.name === 'NotSupportedError') {
-      const errorMsg = '⚠️ Unsupported input or output. Please try different content.'
       console.error('[AI] NotSupportedError:', e.message)
-      opts.onChunk?.(errorMsg)
-      return errorMsg
+      opts.onChunk?.(troubleshooting)
+      return troubleshooting
     }
     
     // 其他错误
-    const errorMsg = '⚠️ Failed to get response. Please try again.'
-    opts.onChunk?.(errorMsg)
-    return errorMsg
+    opts.onChunk?.(troubleshooting)
+    return troubleshooting
   }
 }
 

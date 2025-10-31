@@ -759,7 +759,7 @@ function renderPageSummary(summary: string, text: string) {
       
       if (!success) {
         isChatMode = false
-        alert('Failed to initialize chat session. Please try again.')
+        alert(`Chat unavailable - AI model not ready or language not supported.\n\nPlease refresh the page and try again later, and also check your console for more details.\n\nWe currently only support English, Japanese, and Spanish. More languages are on the way.\n\nQuick Setup Guide:\n1. Use Chrome 138+ or Chrome Canary/Dev (chrome://version)\n2. Enable flags in chrome://flags:\n   • #prompt-api-for-gemini-nano → Enabled Multilingual\n   • #optimization-guide-on-device-model → Enabled BypassPerfRequirement\n3. Restart browser\n4. Download model at chrome://components (Optimization Guide On Device Model)\n5. Requirements: 22GB disk space, 4GB+ GPU or 16GB+ RAM\n\nLearn more: https://developer.chrome.com/docs/ai/built-in-apis`)
         return
       }
       
@@ -1056,7 +1056,7 @@ async function handleChatSubmit(question: string) {
       }
       const errorMsg: ChatMessage = {
         role: 'assistant',
-        content: '⚠️ Failed to get response. Please try again.',
+        content: '⚠️ Language not supported or model not ready. Please check your console for more details and try again.',
         timestamp: Date.now()
       }
       chatMessages.push(errorMsg)
