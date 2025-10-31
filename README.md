@@ -1,9 +1,9 @@
-# Chrome AI Companion
+# STEPS: Your personal Chrome AI Companion
 
 <p align="center">
   <img src="public/icon128.png" alt="STEPS: Your personal Chrome AI Companion" width="96" height="96" />
 </p>
-<h2 align="center"><b>Private, on‑device AI build only for you</b></h2>
+<h4 align="center"><b>Private, on‑device AI build only for you</b></h4>
 <h4 align="center">Summarize • Translate • Explain • Page Chat • Save Notes — all locally with Chrome Built‑in AI.</h4>
 
 Instructions to install, run and evaluate this Chrome Extension from a clean environment.
