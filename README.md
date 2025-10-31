@@ -264,7 +264,7 @@ npm run lint    # run ESLint
 
 ## 13) Contact & Support
 
-If you encounter any issues, have questions, or want to request features, feel free to reach out:
+If you encounter any issues, have questions and feedbacks, or want to request features, feel free to reach out:
 
 📧 **Email**: [danieldd@umich.edu](mailto:danieldd@umich.edu)
 
