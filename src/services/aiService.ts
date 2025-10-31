@@ -236,7 +236,7 @@ function determineLength(text: string): 'short' | 'medium' | 'long' {
   const wordCount = text.split(/\s+/).length
   
   if (wordCount < 200) return 'short'
-  if (wordCount < 800) return 'medium'
+  if (wordCount < 500) return 'medium'
   return 'long'
 }
 async function getSummarizer(text: string, opts: SummOpts = {}): Promise<Summarizer | null> {

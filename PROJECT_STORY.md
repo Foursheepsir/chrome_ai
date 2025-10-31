@@ -171,7 +171,7 @@ Every feature follows three principles:
 Chrome AI instances are expensive to create (~200ms each). We cache them:
 
 ```typescript
-// Cache key: "summarizer:tldr:en:medium"
+// Cache key (summarizer): "tldr:en:medium"
 const cacheKey = `${type}:${outputLang}:${length}`
 if (summarizerCache.has(cacheKey)) {
   return summarizerCache.get(cacheKey)
@@ -195,34 +195,33 @@ Keep it concise and relevant to the context.
 
 This makes explanations 3x more relevant than generic definitions.
 
-#### 3. **Adaptive Summarization**
+#### 3. **Adaptive Summarization with Context-Aware Types**
 
-We adjust summary length based on input:
+We use different summary types based on use case:
 
+```typescript
+// For full page summaries: use "tldr" style
+// Gives readers quick overview of entire page
+const pageSummary = await summarize(pageText, { 
+  type: 'tldr', 
+  lang: targetLang 
+})
+
+// For selected text: use "key-points" style  
+// Helps readers extract main ideas from paragraphs
+const selectionSummary = await summarize(selectedText, { 
+  type: 'key-points', 
+  lang: targetLang 
+})
+```
+
+We also adjust length dynamically based on input size:
 ```typescript
 const wordCount = text.split(/\s+/).length
 const length = wordCount < 200 ? 'short' 
-             : wordCount < 800 ? 'medium' 
+             : wordCount < 500 ? 'medium' 
              : 'long'
 ```
-
-Small snippets get 1 sentence; full articles get 5.
-
-#### 4. **Streaming with Backpressure**
-
-Chrome's streaming APIs can overwhelm the UI. We throttle updates:
-
-```typescript
-for await (const chunk of stream) {
-  accumulatedText += chunk
-  if (Date.now() - lastUpdate > 50) { // Max 20 FPS
-    updateUI(accumulatedText)
-    lastUpdate = Date.now()
-  }
-}
-```
-
-This kept the UI responsive even with long responses.
 
 ---
 
@@ -264,7 +263,7 @@ But confidence scores don't always reflect reality (short text = low confidence)
 **Solution:** We added heuristics:
 - Require >70% confidence
 - If mixed languages detected, prefer user's browser language
-- Allow manual override in popup settings
+- Use the most popular language 'en' as fallback
 
 ### Challenge 3: **Token Limits in Page Chat**
 
@@ -276,34 +275,146 @@ session.inputUsage  // Current usage
 
 Long conversations + page content = token overflow.
 
-**Solution:** We implemented sliding window context:
-1. Keep the most recent 5 messages
-2. Truncate page summary to 1000 tokens
-3. Show real-time usage indicator:
-   - 🟢 Green (<50% used)
-   - 🟡 Yellow (50-80%)
-   - 🔴 Red (>80%)
+**Solution:** We display real-time token usage with color-coded indicators:
 
-### Challenge 4: **Cross-Origin Content Scripts**
-
-**Problem:** Content scripts run in isolated worlds. Page variables (like `window.ai`) aren't accessible.
-
-**Solution:** We inject scripts into the main world for API access:
-
-```javascript
-const script = document.createElement('script')
-script.textContent = `(${checkAPIAvailability.toString()})()`
-document.documentElement.appendChild(script)
+```typescript
+const tokenUsage = getPageChatTokenUsage()
+const colorClass = tokenUsage.percentage < 50 ? 'low' 
+                 : tokenUsage.percentage < 80 ? 'medium' 
+                 : 'high'
 ```
 
-### Challenge 5: **Performance on Large Pages**
+CSS styling provides visual feedback:
+- 🟢 Green (<50% used) — `color: #188038, background: #e6f4ea`
+- 🟡 Yellow (50-80%) — `color: #e37400, background: #fef7e0`
+- 🔴 Red (>80%) — `color: #c5221f, background: #fce8e6`
+
+Users can see context usage before hitting limits.
+
+### Challenge 4: **Graceful Abort Handling**
+
+**Problem:** Users can interrupt AI generation in multiple ways:
+- Refresh the page mid-generation
+- Navigate away
+- Click outside the tooltip
+- Open another tooltip action
+
+If not handled properly, this leaves dangling API sessions and corrupted UI state.
+
+**Solution:** We implemented comprehensive abort mechanisms:
+
+```typescript
+// Abort flags for different operations
+let shouldAbortSummarize = false
+let shouldAbortTranslate = false
+let currentPageChatAbortController: AbortController | null = null
+
+// Hide tooltip aborts all ongoing operations
+function hideResultBubble() {
+  abortSummarize()
+  abortTranslate()
+  destroyExplainSession()
+  resultBubbleEl?.remove()
+}
+
+// Click outside → abort
+document.addEventListener('mousedown', (e) => {
+  if (resultBubbleEl && !resultBubbleEl.contains(e.target)) {
+    hideResultBubble() // Safely aborts and cleans up
+  }
+})
+
+// Page chat uses AbortController for cancellation
+const stream = session.promptStreaming(question, {
+  signal: currentPageChatAbortController?.signal
+})
+
+// User can click "Stop" button during generation
+submitBtn.addEventListener('click', () => {
+  if (isGeneratingChat) {
+    abortPageChatGeneration() // Abort streaming
+    isGeneratingChat = false
+    // Keep partial content already generated
+  }
+})
+```
+
+**Key insight:** We preserve already-generated content even when aborted, so users don't lose partial results.
+
+### Challenge 5: **Multi-Tab Consistency**
+
+**Problem:** Users often open the same URL in multiple tabs. Without synchronization:
+- Tab A generates summary → Tab B doesn't see it
+- Tab A asks chat questions → Tab B has stale conversation
+- State divergence causes confusion
+
+**Solution:** URL-keyed storage with content hashing:
+
+```typescript
+// Store summaries by URL
+await setPageSummary(currentUrl, summary, text)
+
+// On page load, check cached summary
+const cached = await getPageSummary(currentUrl)
+if (cached) {
+  currentPageSummary = cached.summary
+  
+  // Verify page content hasn't changed
+  const chatHistory = await getPageChatHistory(currentUrl)
+  if (chatHistory.contentHash === cached.contentHash) {
+    // Content unchanged → restore chat history
+    chatMessages = chatHistory.messages
+  } else {
+    // Content changed → clear stale chat
+    await clearPageChatHistory(currentUrl)
+  }
+}
+```
+
+**Result:** 
+- Multiple tabs of same URL share summary and chat
+- If page content changes (e.g., dynamic site), chat history is safely cleared
+- Users can close and reopen tabs without losing context
+
+### Challenge 6: **Persistent State Across Sessions**
+
+**Problem:** Browser extensions usually lose state on page refresh or tab close. For research workflows, this is a dealbreaker—imagine losing a 10-message conversation with a research paper.
+
+**Solution:** Chrome storage for side panel and popup persistence:
+
+```typescript
+// Save summary + metadata
+interface PageSummaryCache {
+  summary: string
+  text: string
+  timestamp: number
+  contentHash: string  // SHA-256 hash for change detection
+  isSaved: boolean     // Track if saved to notes
+}
+
+// Save chat history
+interface PageChatHistory {
+  messages: ChatMessage[]
+  contentHash: string
+  timestamp: number
+}
+```
+
+**Features enabled:**
+- ✅ Close page → reopen → chat history restored
+- ✅ Refresh during generation → state preserved
+- ✅ Multiple URLs → each has separate chat context
+- ✅ Notes synced across popup and all tabs
+- ✅ Export notes as JSON for further archival
+
+### Challenge 7: **Performance on Large Pages**
 
 **Problem:** Extracting text from massive pages (10,000+ words) blocked the UI.
 
 **Solution:** 
-- Use `requestIdleCallback` for non-urgent processing
-- Truncate to first 2000 words for summarization
+- Truncate to first ~2000 words for summarization
 - Stream results to avoid blocking
+- Use flags to prevent duplicate generation requests and ensure idempotence
 
 ---
 
@@ -340,7 +451,7 @@ document.documentElement.appendChild(script)
    - **Unified workflows win**
 
 2. **Privacy Is a Feature**
-   - "On-device" is a selling point
+   - "On-device" is a big selling point
    - Users care about data sovereignty
    - Especially for work/research content
 
