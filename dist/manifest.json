@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome AI Companion (Local)",
+  "version": "0.1.0",
+  "description": "Summarize selections or full pages, explain terms, translate, and save notes — all on-device.",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "AI Companion",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "service-worker-loader.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "contextMenus",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "js": [
+        "assets/index.ts-loader-BztMQeMK.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "css": [
+        "src/content/styles.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "commands": {
+    "toggle-panel": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Toggle AI side panel"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "icon16.png",
+        "icon32.png",
+        "icon48.png",
+        "icon128.png",
+        "assets/*",
+        "src/content/*",
+        "public/*",
+        "assets/storage-DBII9k0A.js",
+        "assets/storage-DBII9k0A.js.map",
+        "assets/index.ts-CI_KCGqg.js",
+        "assets/index.ts-CI_KCGqg.js.map"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

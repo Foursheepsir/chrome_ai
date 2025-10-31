@@ -37,12 +37,20 @@ APIs used: Summarizer API, Translator API, Prompt API, LanguageDetector. See imp
 
 If you only want to try the extension, you do NOT need Node.js.
 
-1. Complete Chrome built‑in AI setup: see [AI Setup Guide](./AI_SETUP.md)
-2. Load the prebuilt extension bundle:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-org-or-user/chrome_ai.git
+   cd chrome_ai
+   ```
+
+2. Complete Chrome built‑in AI setup: see [AI Setup Guide](./AI_SETUP.md)
+
+3. Load the prebuilt extension bundle:
    - Open `chrome://extensions`
    - Enable "Developer mode"
    - Click "Load unpacked" and choose the `dist/` folder from this repository
-3. Start using it on any webpage (see “How to Use and Test” below)
+
+4. Start using it on any webpage (see "How to Use and Test" below)
 
 
 ## 3) Build From Source (Optional)
