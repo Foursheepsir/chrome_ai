@@ -337,7 +337,7 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
 
   try {
     if (action === 'summ') {
-      showResultBubble('Generating summary...', { showActions: false })
+      showResultBubble('Generating summary... It may take a while for Chrome to download the required models for the first time. Thanks for your patience!', { showActions: false })
       
       const result = await summarize(selected, {
         type: 'key-points',
@@ -351,7 +351,7 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
         addSaveButtonToBubble('summary', selected)
       }
     } else if (action === 'exp') {
-      showResultBubble('Generating explanation...', { showActions: false })
+      showResultBubble('Generating explanation... It may take a while for Chrome to download the required models for the first time. Thanks for your patience!', { showActions: false })
       
       try {
         const wordCount = selected.trim().split(/\s+/).length
@@ -381,7 +381,7 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
         showResultBubble('⚠️ Failed to generate explanation. Please refresh the page and try again later.')
       }
     } else if (action === 'tr') {
-      showResultBubble('Translating...', { showActions: false })
+      showResultBubble('Translating... It may take a while for Chrome to download the required models for the first time. Thanks for your patience!', { showActions: false })
       
       await translate(selected, { 
         targetLang,
@@ -630,7 +630,7 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       if (existingSaveBtn) existingSaveBtn.disabled = true
       if (existingRefreshBtn) existingRefreshBtn.disabled = true
       
-      showSidePanel('Generating summary...')
+      showSidePanel('Generating summary... It may take a while for Chrome to download the required models for the first time. Thanks for your patience!')
       const text = extractReadableText(document)
       
       let isFirstChunk = true
