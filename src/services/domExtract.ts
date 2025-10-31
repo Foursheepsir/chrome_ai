@@ -1,10 +1,33 @@
+/**
+ * DOM Extraction Utilities
+ * 
+ * Provides utilities for extracting text content from web pages
+ * and user selections for AI processing.
+ */
+
+/**
+ * Get the currently selected text
+ * @returns The trimmed selected text, or empty string if nothing is selected
+ */
 export function getSelectionText(): string {
   const sel = window.getSelection()
   return sel ? sel.toString().trim() : ''
 }
 
+/**
+ * Extract readable text content from a document
+ * 
+ * This function attempts to extract only the main content of a page,
+ * filtering out navigation, ads, scripts, and other noise. It uses:
+ * 1. Common semantic selectors (main, article, etc.)
+ * 2. Fallback to full body with cleanup
+ * 3. JSON detection to avoid processing data dumps
+ * 
+ * @param doc - The document to extract from (defaults to current document)
+ * @returns Cleaned, readable text content
+ */
 export function extractReadableText(doc: Document = document): string {
-  // 优先尝试从主要内容区域提取（使用原始文档的 innerText）
+  // Try to find main content area using common selectors
   const mainContentSelectors = [
     'main',
     '[role="main"]',
@@ -17,6 +40,7 @@ export function extractReadableText(doc: Document = document): string {
     '[class*="article-content"]'
   ]
   
+  // Try each selector until we find substantial non-JSON content
   for (const sel of mainContentSelectors) {
     const mainEl = doc.querySelector(sel) as HTMLElement
     if (mainEl && mainEl.innerText) {
@@ -27,10 +51,10 @@ export function extractReadableText(doc: Document = document): string {
     }
   }
   
-  // 如果没找到主要内容，克隆 body 并清理
+  // Fallback: clone body and remove unwanted elements
   const cloned = doc.body.cloneNode(true) as HTMLElement
   
-  // 移除不需要的元素
+  // Remove navigation, ads, scripts, and other non-content elements
   const selectorsToRemove = [
     'nav', 'header', 'footer', 'aside',
     'script', 'style', 'noscript',
@@ -49,21 +73,35 @@ export function extractReadableText(doc: Document = document): string {
   return cleanText(cloned.textContent || '')
 }
 
-// 检测文本是否看起来像 JSON
+/**
+ * Detect if text looks like JSON data
+ * Uses character ratio heuristic to identify JSON-heavy content
+ * 
+ * @param text - Text to check
+ * @returns true if text appears to be JSON data
+ */
 function looksLikeJSON(text: string): boolean {
-  // 如果文本中有大量 JSON 特征字符，认为是 JSON 数据
   const jsonChars = text.match(/[{}\[\]":,]/g) || []
   const totalChars = text.length
   const jsonRatio = jsonChars.length / totalChars
   
-  // 如果 JSON 字符占比超过 20%，可能是 JSON 数据
+  // If >20% of characters are JSON syntax, assume it's JSON
   return jsonRatio > 0.2
 }
 
+/**
+ * Clean extracted text
+ * - Normalize whitespace (multiple spaces → single space)
+ * - Limit consecutive newlines (max 2)
+ * - Trim leading/trailing whitespace
+ * 
+ * @param text - Text to clean
+ * @returns Cleaned text
+ */
 function cleanText(text: string): string {
   return text
-    .replace(/\s+/g, ' ')  // 将多个空白字符替换为单个空格
-    .replace(/\n{3,}/g, '\n\n')  // 将多个换行替换为最多两个
+    .replace(/\s+/g, ' ')           // Normalize whitespace
+    .replace(/\n{3,}/g, '\n\n')     // Max 2 consecutive newlines
     .trim()
 }
   

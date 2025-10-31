@@ -1,3 +1,14 @@
+/**
+ * Content Script - Main Entry Point
+ * 
+ * This script is injected into every web page and provides:
+ * 1. Selection Tooltip - Quick actions for selected text (Summarize, Explain, Translate, Save)
+ * 2. Result Bubble - Displays AI-generated results in a floating bubble
+ * 3. Floating Button - Always-accessible button for page-level actions
+ * 4. Side Panel - Full-page summary and AI chat interface
+ * 5. Page Chat - Multi-turn conversation about the current page
+ */
+
 import { getSelectionText, extractReadableText } from '../services/domExtract'
 import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession, getPageChatTokenUsage, abortPageChatGeneration } from '../services/aiService'
 import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, updatePageSummarySaveStatus, getPageChatHistory, setPageChatHistory, clearPageChatHistory, hashText, type ChatMessage } from '../services/storage'
@@ -5,10 +16,15 @@ import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 import { marked } from 'marked'
 
-/** ---------------- Tooltip（选区操作条） ---------------- */
-
-// 提取选区的上下文（用于 explain）
-// 注意：此函数只在选中内容≤4个词时被调用
+/**
+ * Extract surrounding context for better explanation
+ * 
+ * For short phrases (<=4 words), we extract one sentence before and after
+ * to give the AI model more context for generating accurate explanations.
+ * 
+ * @param selectedText - The text selected by the user
+ * @returns The selected text with surrounding context, or just the selected text if extraction fails
+ */
 function getContextForExplain(selectedText: string): string {
   try {
     const selection = window.getSelection()
@@ -17,36 +33,29 @@ function getContextForExplain(selectedText: string): string {
     const range = selection.getRangeAt(0)
     const container = range.commonAncestorContainer
     
-    // 获取包含选区的文本节点的父元素
     const parentElement = container.nodeType === Node.TEXT_NODE 
       ? container.parentElement 
       : container as Element
     
     if (!parentElement) return selectedText
     
-    // 获取父元素的完整文本
     const fullText = parentElement.textContent || ''
     
-    // 找到选中文本在完整文本中的位置
     const selectionStart = fullText.indexOf(selectedText)
     if (selectionStart === -1) return selectedText
     
-    // 提取前后文本
     const beforeText = fullText.substring(0, selectionStart)
     const afterText = fullText.substring(selectionStart + selectedText.length)
     
-    // 提取前一句话（找最后一个句号、问号、感叹号或换行）
     const sentenceEndRegex = /[.!?\n]/
     const beforeSentences = beforeText.split(sentenceEndRegex)
     const prevSentence = beforeSentences.length > 0 
       ? beforeSentences[beforeSentences.length - 1].trim() 
       : ''
     
-    // 提取后一句话（找第一个句号、问号、感叹号或换行）
     const nextSentenceMatch = afterText.match(/^[^.!?\n]+[.!?\n]?/)
     const nextSentence = nextSentenceMatch ? nextSentenceMatch[0].trim() : ''
     
-    // 组合：前一句 + 选中内容 + 后一句
     const context = [
       prevSentence,
       selectedText,
@@ -60,9 +69,17 @@ function getContextForExplain(selectedText: string): string {
   }
 }
 
-let lastSelectionRect: DOMRect | null = null
-let resultBubbleEl: HTMLDivElement | null = null
+// ============================================================================
+// Selection Tooltip - Quick actions for selected text
+// ============================================================================
 
+let lastSelectionRect: DOMRect | null = null  // Store selection position for result bubble placement
+let resultBubbleEl: HTMLDivElement | null = null  // Result bubble DOM element
+
+/**
+ * Create or retrieve the selection tooltip element
+ * The tooltip contains action buttons that appear when text is selected
+ */
 function ensureTooltip() {
   let tip = document.getElementById('__ai_companion_tip__') as HTMLDivElement | null
   if (!tip) {
@@ -86,16 +103,20 @@ function ensureTooltip() {
   return tip
 }
 
+/**
+ * Position the tooltip below the selected text
+ */
 function positionTooltip(tip: HTMLDivElement) {
   const sel = document.getSelection()
   if (!sel || sel.rangeCount === 0) return
   const rect = sel.getRangeAt(0).getBoundingClientRect()
-  lastSelectionRect = rect
+  lastSelectionRect = rect  // Store for result bubble positioning
   tip.style.top = `${window.scrollY + rect.bottom + 6}px`
   tip.style.left = `${window.scrollX + rect.left}px`
   tip.style.display = 'flex'
 }
 
+// Show/hide tooltip on text selection
 document.addEventListener('mouseup', () => {
   const txt = getSelectionText()
   const tip = ensureTooltip()
@@ -103,10 +124,14 @@ document.addEventListener('mouseup', () => {
   if (txt) positionTooltip(tip)
 })
 
-/** ---------------- 结果气泡（常驻，直到点击外部或按 Esc） ---------------- */
+// ============================================================================
+// Result Bubble - Displays AI-generated results
+// ============================================================================
 
+/**
+ * Hide the result bubble and abort any ongoing AI operations
+ */
 function hideResultBubble() {
-  // 中止所有正在进行的 AI 操作
   abortSummarize()
   abortTranslate()
   destroyExplainSession()
@@ -115,35 +140,46 @@ function hideResultBubble() {
   resultBubbleEl = null
 }
 
+/**
+ * Show or update the result bubble with AI-generated content
+ * 
+ * The result bubble displays AI responses (summary, explanation, translation) near
+ * the selected text. It supports streaming updates for real-time content display.
+ * 
+ * @param markupOrText - The content to display (can include markdown)
+ * @param opts - Options for displaying the bubble
+ *   - kind: Type of note (summary, explain, translation, note)
+ *   - snippet: Original text snippet
+ *   - updateOnly: If true, only update existing bubble content (for streaming)
+ *   - showActions: Whether to show the save button
+ */
 function showResultBubble(
   markupOrText: string,
   opts?: { kind?: Note['kind']; snippet?: string; updateOnly?: boolean; showActions?: boolean }
 ) {
-  // 如果是更新模式且气泡已存在，只更新内容
+  // For streaming updates, just update the content without recreating the entire bubble
   if (opts?.updateOnly && resultBubbleEl) {
     const content = resultBubbleEl.querySelector('.ai-bubble-content')
     if (content) {
       content.innerHTML = renderMarkdown(markupOrText)
-      // 更新存储的文本内容（用于保存）
       resultBubbleEl.setAttribute('data-full-text', markupOrText)
       return
     }
   }
   
-  // 否则重新创建
+  // Create new bubble
   hideResultBubble()
   const el = document.createElement('div')
   el.className = 'ai-result-bubble'
-  // 存储完整文本内容（用于保存）
-  el.setAttribute('data-full-text', markupOrText)
+  el.setAttribute('data-full-text', markupOrText)  // Store full text for saving
   
-  // 内容区域
+  // Content area
   const content = document.createElement('div')
   content.className = 'ai-bubble-content'
   content.innerHTML = renderMarkdown(markupOrText)
   el.appendChild(content)
 
-  // 如果提供了保存选项且 showActions 为 true，添加 Save 按钮
+  // Add save button if options are provided
   if (opts?.kind && opts?.snippet && opts?.showActions) {
     const actions = document.createElement('div')
     actions.className = 'ai-bubble-actions'
@@ -152,7 +188,6 @@ function showResultBubble(
     saveBtn.className = 'ai-bubble-save'
     saveBtn.innerHTML = 'Save to Notes'
     saveBtn.addEventListener('click', async () => {
-      // 从元素中读取最新的完整文本
       const currentText = el.getAttribute('data-full-text') || markupOrText
       await saveNoteToStore(opts.kind!, currentText, opts.snippet)
       saveBtn.innerHTML = '✓ Saved'
@@ -165,6 +200,7 @@ function showResultBubble(
 
   document.documentElement.appendChild(el)
 
+  // Position near the selected text
   const base = lastSelectionRect
   const top = base ? window.scrollY + base.bottom + 8 : window.scrollY + 80
   const left = base ? window.scrollX + base.left : window.scrollX + 80
@@ -174,11 +210,13 @@ function showResultBubble(
   resultBubbleEl = el
 }
 
-// 添加保存按钮到已存在的气泡
+/**
+ * Add a save button to an existing result bubble
+ * Used after AI generation completes to allow saving the result
+ */
 function addSaveButtonToBubble(kind: Note['kind'], snippet: string) {
   if (!resultBubbleEl) return
   
-  // 检查是否已有 actions 区域
   let actions = resultBubbleEl.querySelector('.ai-bubble-actions') as HTMLDivElement | null
   if (!actions) {
     actions = document.createElement('div')
@@ -190,7 +228,6 @@ function addSaveButtonToBubble(kind: Note['kind'], snippet: string) {
   saveBtn.className = 'ai-bubble-save'
   saveBtn.innerHTML = 'Save to Notes'
   saveBtn.addEventListener('click', async () => {
-    // 从元素中读取最新的完整文本
     const currentText = resultBubbleEl!.getAttribute('data-full-text') || ''
     await saveNoteToStore(kind, currentText, snippet)
     saveBtn.innerHTML = '✓ Saved'
@@ -200,6 +237,7 @@ function addSaveButtonToBubble(kind: Note['kind'], snippet: string) {
   actions.appendChild(saveBtn)
 }
 
+// Hide result bubble when clicking outside
 document.addEventListener('mousedown', (e) => {
   const target = e.target as Node
   const tip = document.getElementById('__ai_companion_tip__')
@@ -208,32 +246,40 @@ document.addEventListener('mousedown', (e) => {
   }
 })
 
+// Hide result bubble on Escape key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') hideResultBubble()
 })
 
+/**
+ * Escape HTML special characters to prevent XSS
+ */
 function escapeHtml(str: string) {
   const div = document.createElement('div')
   div.innerText = str
   return div.innerHTML
 }
 
-// 配置 marked
+// Configure marked for better markdown rendering
 marked.setOptions({
-  breaks: true, // 支持 GitHub 风格的换行（单个换行符转为 <br>）
-  gfm: true, // 启用 GitHub Flavored Markdown
-  pedantic: false, // 不使用严格模式，更宽松地解析
+  breaks: true,      // Convert \n to <br>
+  gfm: true,         // GitHub Flavored Markdown
+  pedantic: false,   // More lenient parsing
 })
 
-// 使用 marked 渲染 markdown（支持纯文本和 markdown 混合）
+/**
+ * Render markdown text to styled HTML
+ * 
+ * Converts markdown to HTML with inline styles for consistent display
+ * across different web pages (no reliance on external CSS).
+ */
 function renderMarkdown(text: string): string {
   if (!text) return ''
   
   try {
-    // 使用 marked 渲染（会自动处理纯文本和 markdown）
     const html = marked.parse(text, { async: false }) as string
     
-    // 为生成的 HTML 添加内联样式
+    // Add inline styles to all elements for consistent display
     return html
       .replace(/<p>/g, '<p style="margin: 8px 0; line-height: 1.6;">')
       .replace(/<ul>/g, '<ul style="margin: 8px 0; padding-left: 24px;">')
@@ -253,23 +299,27 @@ function renderMarkdown(text: string): string {
       .replace(/<em>/g, '<em style="font-style: italic;">')
   } catch (e) {
     console.error('[Markdown render error]', e)
-    // 降级：返回转义的纯文本，保留换行
     return '<p style="margin: 8px 0; line-height: 1.6;">' + escapeHtml(text).replace(/\n/g, '<br/>') + '</p>'
   }
 }
 
-/** ---------------- 选区按钮行为 ---------------- */
-
+/**
+ * Handle tooltip button actions (Summarize, Explain, Translate, Save)
+ * 
+ * This function processes the selected text using Chrome's Built-in AI APIs
+ * and displays the results in a bubble. It supports streaming updates for
+ * real-time feedback.
+ * 
+ * @param action - The action to perform
+ */
 async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
   const selected = getSelectionText()
   if (!selected) return
 
-  // 如果是直接保存，不需要AI处理
   if (action === 'save') {
     try {
       await saveNoteToStore('note', selected)
       showResultBubble('✓ Saved')
-      // 1秒后自动隐藏提示
       setTimeout(() => hideResultBubble(), 1000)
     } catch (e) {
       console.error('[Save error]', e)
@@ -278,66 +328,52 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
     return
   }
 
-  // 禁用 tooltip 的所有按钮
   const tip = document.getElementById('__ai_companion_tip__')
   const buttons = tip?.querySelectorAll('button') as NodeListOf<HTMLButtonElement>
   buttons?.forEach(btn => btn.disabled = true)
 
-  const targetLang = (await getSetting<string>('targetLang')) || 'en'  // 默认英语
+  const targetLang = (await getSetting<string>('targetLang')) || 'en'
   console.log('[Content] Target language from storage:', targetLang)
 
   try {
     if (action === 'summ') {
-      // 先显示加载提示
       showResultBubble('Generating summary...', { showActions: false })
       
-      // 使用流式更新 - 选中文本用 key-points（要点列表）
       const result = await summarize(selected, {
         type: 'key-points',
         lang: targetLang,
         onChunk: (chunk) => {
-          // 直接更新内容
           showResultBubble(chunk, { kind: 'summary', snippet: selected, updateOnly: true })
         }
       })
       
-      // 生成完成后，只在非警告消息时添加保存按钮
-      // 警告消息以 ⚠️ 开头
       if (result && !result.startsWith('⚠️')) {
         addSaveButtonToBubble('summary', selected)
       }
     } else if (action === 'exp') {
-      // 先显示加载提示
       showResultBubble('Generating explanation...', { showActions: false })
       
       try {
-        // 检查词数，只有 ≤4 个词时才提取上下文
         const wordCount = selected.trim().split(/\s+/).length
         console.log('[Content] Selected text word count:', wordCount)
         
         let context: string | undefined
         if (wordCount <= 4) {
-          // 短语：提取前后各一句话作为上下文
           context = getContextForExplain(selected)
           console.log('[Content] Short phrase detected - extracting context:', context)
         } else {
-          // 长文本：不需要额外上下文
           console.log('[Content] Long text detected - no additional context needed')
         }
         
-        // 使用流式更新
         const result = await explain(selected, {
           context,
           lang: targetLang,
           onChunk: (chunk) => {
-            // 直接更新内容
             showResultBubble(chunk, { kind: 'explain', snippet: selected, updateOnly: true })
           }
         })
         
-        // 如果结果是空的（可能被中止），不添加保存按钮
         if (result && result.trim()) {
-          // 生成完成后，添加保存按钮
           addSaveButtonToBubble('explain', selected)
         }
       } catch (explainError) {
@@ -345,32 +381,32 @@ async function handleAction(action: 'summ' | 'exp' | 'tr' | 'save') {
         showResultBubble('⚠️ Failed to generate explanation. Please refresh the page and try again later.')
       }
     } else if (action === 'tr') {
-      // 先显示加载提示
       showResultBubble('Translating...', { showActions: false })
       
-      // 使用流式更新翻译
       await translate(selected, { 
         targetLang,
         onChunk: (chunk) => {
-          // 直接更新内容
           showResultBubble(chunk, { kind: 'translation', snippet: selected, updateOnly: true })
         }
       })
       
-      // 生成完成后，添加保存按钮
       addSaveButtonToBubble('translation', selected)
     }
   } catch (e) {
     console.error('[AI action error]', e)
     showResultBubble('⚠️ Failed to generate result. Please refresh the page and try again later.')
   } finally {
-    // 重新启用 tooltip 的所有按钮
     buttons?.forEach(btn => btn.disabled = false)
   }
 }
 
-/** ---------------- 保存笔记 ---------------- */
-
+/**
+ * Save a note to chrome.storage.local
+ * 
+ * @param kind - Type of note (summary, explain, translation, note)
+ * @param text - The main content
+ * @param snippet - Optional original text snippet
+ */
 async function saveNoteToStore(kind: Note['kind'], text: string, snippet?: string) {
   const note: Note = {
     id: nanoid(),
@@ -385,22 +421,34 @@ async function saveNoteToStore(kind: Note['kind'], text: string, snippet?: strin
   await addNote(note)
 }
 
-/** ---------------- 悬浮球 + 侧边栏（整页 Summary） ---------------- */
+// ============================================================================
+// Floating Button + Side Panel - Full page summary and chat
+// ============================================================================
 
+// UI Element references
 let floatBtnEl: HTMLDivElement | null = null
 let sidePanelEl: HTMLDivElement | null = null
 let sidePanelContentEl: HTMLDivElement | null = null
 let sidePanelOpen = false
-let isGeneratingPageSummary = false  // 防止重复生成页面摘要
 
-// Page Chat 相关状态
-let chatMessages: ChatMessage[] = []  // 当前对话历史
-let currentPageText = ''  // 当前页面文本
-let currentPageSummary = ''  // 当前页面摘要
-let isChatMode = false  // 是否在聊天模式
-let isGeneratingChat = false  // 是否正在生成聊天回复
-let isPageSummarySaved = false  // 当前页面摘要是否已保存
+// Page summary state
+let isGeneratingPageSummary = false  // Prevent duplicate summary generation
+let isPageSummarySaved = false       // Track if current summary is saved
 
+// Page chat state
+let chatMessages: ChatMessage[] = []  // Conversation history
+let currentPageText = ''              // Current page text content
+let currentPageSummary = ''           // Current page summary
+let isChatMode = false                // Whether chat interface is active
+let isGeneratingChat = false          // Whether AI is generating response
+
+/**
+ * Create or retrieve the floating button
+ * 
+ * The floating button is always visible in the bottom-left corner and provides
+ * quick access to page-level AI features (summary + chat). It can be dragged
+ * to any position and hidden via the close button.
+ */
 function ensureFloatingButton() {
     if (floatBtnEl) return floatBtnEl
   
@@ -409,13 +457,11 @@ function ensureFloatingButton() {
     el.className = 'ai-float-btn'
     el.title = 'Summarize this page'
   
-    // 内部图标层（负责旋转）
     const icon = document.createElement('div')
     icon.className = 'ai-float-icon'
     icon.style.backgroundImage = `url(${chrome.runtime.getURL('icon128.png')})`
     el.appendChild(icon)
   
-    // 关闭小图标（左上角，仅悬停可见）
     const close = document.createElement('div')
     close.className = 'ai-float-close'
     close.textContent = '×'
@@ -427,13 +473,10 @@ function ensureFloatingButton() {
       await setSetting('floatHidden', true)
     })
   
-    // Tooltip 提示（悬停时显示）
     const tooltip = document.createElement('div')
     tooltip.className = 'ai-float-tooltip'
     tooltip.innerHTML = 'Click to summarize the page & ask any follow-up questions!'
     el.appendChild(tooltip)
-  
-    // Hover 显示/隐藏 tooltip
     el.addEventListener('mouseenter', () => {
       if (!dragging) {
         tooltip.classList.add('visible')
@@ -445,7 +488,6 @@ function ensureFloatingButton() {
   
     document.documentElement.appendChild(el)
   
-    // 读取上次位置 / 是否隐藏
     ;(async () => {
       const pos = await getSetting<{ left: number; top: number }>('floatPos')
       const hidden = await getSetting<boolean>('floatHidden')
@@ -453,7 +495,6 @@ function ensureFloatingButton() {
         el.style.left = `${pos.left}px`
         el.style.top = `${pos.top}px`
       } else {
-        // 默认左下角，使用 top 计算位置
         el.style.left = '24px'
         el.style.top = `${window.innerHeight - 64 - 24}px`
       }
@@ -462,14 +503,13 @@ function ensureFloatingButton() {
       if (hidden) el.style.display = 'none'
     })()
   
-    // —— 拖动支持 ——
     let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0
     let moved = false
     const DRAG_THRESHOLD = 4
   
     const onPointerDown = (clientX: number, clientY: number) => {
       dragging = true; moved = false; el.classList.add('dragging')
-      tooltip.classList.remove('visible')  // 拖动时隐藏 tooltip
+      tooltip.classList.remove('visible')
       const rect = el.getBoundingClientRect()
       startLeft = rect.left; startTop = rect.top
       startX = clientX; startY = clientY
@@ -479,7 +519,6 @@ function ensureFloatingButton() {
       const dx = clientX - startX, dy = clientY - startY
       if (!moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
         moved = true
-        // 只在真正开始拖动时才切换定位方式
         el.style.right = 'auto'
         el.style.bottom = 'auto'
       }
@@ -499,14 +538,11 @@ function ensureFloatingButton() {
         return
       }
       
-      // 如果侧边栏打开，关闭它
       if (sidePanelOpen) { 
         hideSidePanel()
         return 
       }
       
-      // 侧边栏关闭的情况下
-      // 如果正在生成，打开侧边栏显示进度（不重新生成）
       if (isGeneratingPageSummary) {
         console.log('[Float Button] Opening panel to show generation progress')
         ensureSidePanel()
@@ -515,7 +551,6 @@ function ensureFloatingButton() {
         return
       }
       
-      // 没有在生成，防止重复点击启动新的生成
       if (isProcessing) return
       isProcessing = true
       
@@ -544,7 +579,6 @@ function ensureFloatingButton() {
   
 
 async function openPanelAndSummarizePage(forceRefresh = false) {
-    // 如果正在生成，只打开侧边栏显示进度，不重新生成
     if (isGeneratingPageSummary) {
       console.log('[AI] Already generating, opening panel to show progress')
       ensureSidePanel()
@@ -555,7 +589,6 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       return
     }
     
-    // 如果是强制刷新，重置保存状态
     if (forceRefresh) {
       isPageSummarySaved = false
     }
@@ -566,59 +599,48 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
     const currentUrl = location.href
     
     try {
-      // 检查缓存（除非强制刷新）
       if (!forceRefresh) {
         const cached = await getPageSummary(currentUrl)
         if (cached) {
-          // 保存到全局状态（用于 chat）
           currentPageText = cached.text
           currentPageSummary = cached.summary
-          isPageSummarySaved = cached.isSaved || false  // 恢复保存状态
+          isPageSummarySaved = cached.isSaved || false
           
-          // 尝试加载对话历史（使用哈希值比较，高效！）
           const chatHistory = await getPageChatHistory(currentUrl)
           if (chatHistory && chatHistory.contentHash === cached.contentHash) {
-            // 页面内容没变，恢复对话历史
             console.log('[Content] ✅ Page unchanged after refresh/reload, restoring chat history')
             console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
             chatMessages = chatHistory.messages
           } else {
-            // 页面内容变了或没有历史，清空
             console.log('[Content] ❌ Page content changed or no history, clearing chat')
             chatMessages = []
             await clearPageChatHistory(currentUrl)
           }
           
-          // 显示缓存的结果
           renderPageSummary(cached.summary, cached.text)
           return
         }
       }
       
-      // 设置生成标志
       isGeneratingPageSummary = true
-      isPageSummarySaved = false  // 重置保存状态（新摘要）
+      isPageSummarySaved = false
       
-      // 禁用现有按钮（如果有）
       const existingSaveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
       const existingRefreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
       if (existingSaveBtn) existingSaveBtn.disabled = true
       if (existingRefreshBtn) existingRefreshBtn.disabled = true
       
-      // 生成新的摘要
       showSidePanel('Generating summary...')
       const text = extractReadableText(document)
       
       let isFirstChunk = true
       
-      // 使用流式更新 - 整页用 tldr（简短概述）
       const targetLang = (await getSetting<string>('targetLang')) || 'en'
       const res = await summarize(text, {
         type: 'tldr',
         lang: targetLang,
         onChunk: (chunk) => {
           if (isFirstChunk) {
-            // 第一次创建完整结构（不显示按钮）
             sidePanelContentEl!.innerHTML = `
               <div class="ai-panel-content-wrapper">
                 <div class="ai-panel-text">${escapeHtml(chunk).replace(/\n/g, '<br/>')}</div>
@@ -626,7 +648,6 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
             `
             isFirstChunk = false
           } else {
-            // 后续只更新文本内容（chunk 是累积的完整结果）
             const textEl = sidePanelContentEl!.querySelector('.ai-panel-text')
             if (textEl) {
               textEl.innerHTML = escapeHtml(chunk).replace(/\n/g, '<br/>')
@@ -635,44 +656,34 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
         }
       })
       
-      // 保存到缓存
       await setPageSummary(currentUrl, res, text)
       
-      // 保存到全局状态（用于 chat）
       currentPageText = text
       currentPageSummary = res
       
-      // 计算当前页面内容的哈希值
       const currentHash = await hashText(text)
       
-      // 尝试加载对话历史（使用哈希值比较，高效！）
       const chatHistory = await getPageChatHistory(currentUrl)
       if (chatHistory && chatHistory.contentHash === currentHash) {
-        // 页面内容没变，恢复对话历史
         console.log('[Content] ✅ Page content matches, restoring chat history')
         console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
         chatMessages = chatHistory.messages
       } else {
-        // 页面内容变了或没有历史，清空
         console.log('[Content] ❌ Page content changed or no history, clearing chat')
         chatMessages = []
         await clearPageChatHistory(currentUrl)
       }
       
-      // 显示最终结果和按钮（启用状态）
       renderPageSummary(res, text)
     } catch (e) {
       console.error(e)
       showSidePanel('⚠️ Failed to summarize this page.')
     } finally {
-      // 重置生成标志
       isGeneratingPageSummary = false
     }
 }
 
 function renderPageSummary(summary: string, text: string) {
-  // 构建基础 HTML
-  // 根据保存状态决定按钮文本和状态
   const saveButtonText = isPageSummarySaved ? 'Saved ✓' : 'Save to Notes'
   const saveButtonDisabled = isPageSummarySaved ? 'disabled' : ''
   
@@ -687,7 +698,6 @@ function renderPageSummary(summary: string, text: string) {
     </div>
   `
   
-  // 如果有对话历史，渲染聊天界面
   if (chatMessages.length > 0 || isChatMode) {
     html += `<div id="__ai_chat_container__" class="ai-chat-container"></div>`
   }
@@ -703,8 +713,7 @@ function renderPageSummary(summary: string, text: string) {
     try {
       await saveNoteToStore('summary', summary, text.slice(0, 300))
       saveBtn.textContent = 'Saved ✓'
-      isPageSummarySaved = true  // 标记为已保存
-      // 更新 storage 中的保存状态
+      isPageSummarySaved = true
       await updatePageSummarySaveStatus(location.href, true)
     } catch (e) {
       console.error('[Save error]', e)
@@ -713,30 +722,25 @@ function renderPageSummary(summary: string, text: string) {
     }
   })
   
-  // Refresh button - 清空一切，重新开始
   const refreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
   refreshBtn?.addEventListener('click', async () => {
     if (isGeneratingPageSummary || isGeneratingChat) {
       console.log('[AI] Generation in progress, canceling and refreshing')
     }
     
-    // 停止当前生成
     abortSummarize()
     destroyPageChatSession()
     
-    // 清空状态
     isChatMode = false
     isGeneratingChat = false
     chatMessages = []
     currentPageText = ''
     currentPageSummary = ''
-    isPageSummarySaved = false  // 重置保存状态
+    isPageSummarySaved = false
     
-    // 清空缓存
     await clearPageSummary(location.href)
     await clearPageChatHistory(location.href)
     
-    // 重新生成
     await openPanelAndSummarizePage(true)
   })
   
@@ -744,10 +748,8 @@ function renderPageSummary(summary: string, text: string) {
   const askBtn = document.getElementById('__ai_ask_followup__') as HTMLButtonElement | null
   askBtn?.addEventListener('click', async () => {
     if (!isChatMode) {
-      // 第一次点击，进入聊天模式
       isChatMode = true
       
-      // 创建 chat session（包含恢复的聊天历史）
       const targetLang = (await getSetting<string>('targetLang')) || 'en'
       console.log('[Content] Creating chat session with', chatMessages.length, 'restored messages')
       const success = await createPageChatSession({
@@ -763,21 +765,16 @@ function renderPageSummary(summary: string, text: string) {
         return
       }
       
-      // 重新渲染整个面板以显示聊天界面
       renderPageSummary(currentPageSummary, currentPageText)
       
-      // 确保 token 状态在下一帧更新（等待 DOM 渲染完成）
       setTimeout(() => updateTokenStatus(), 0)
     }
   })
   
-  // 如果已经在聊天模式或有历史，渲染聊天UI
   if (chatMessages.length > 0 || isChatMode) {
     renderChatUI()
     
-    // 如果有 chat history 但还没有 session，自动创建 session（以便显示 token usage）
     if (chatMessages.length > 0 && !hasPageChatSession()) {
-      // 异步创建 session，不阻塞 UI 渲染
       ;(async () => {
         const targetLang = (await getSetting<string>('targetLang')) || 'en'
         console.log('[Content] Auto-creating chat session for restored history')
@@ -789,7 +786,6 @@ function renderPageSummary(summary: string, text: string) {
         })
         
         if (success) {
-          // Session 创建成功后，重新渲染 chat UI 以显示 token status
           console.log('[Content] Session created, re-rendering chat UI to show token status')
           renderChatUI()
         }
@@ -798,7 +794,6 @@ function renderPageSummary(summary: string, text: string) {
   }
 }
 
-// 更新 token 使用状态显示
 function updateTokenStatus() {
   const tokenStatus = document.querySelector('.ai-chat-token-status')
   if (!tokenStatus) return
@@ -809,7 +804,6 @@ function updateTokenStatus() {
     return
   }
   
-  // 更新百分比和颜色
   const colorClass = tokenUsage.percentage < 50 ? 'low' : tokenUsage.percentage < 80 ? 'medium' : 'high'
   tokenStatus.className = `ai-chat-token-status ${colorClass}`
   tokenStatus.setAttribute('title', `Context window usage: ${tokenUsage.usage} / ${tokenUsage.quota} tokens`)
@@ -820,12 +814,10 @@ function updateTokenStatus() {
   }
 }
 
-// 渲染聊天 UI
 function renderChatUI() {
   const chatContainer = document.getElementById('__ai_chat_container__')
   if (!chatContainer) return
   
-  // 构建聊天消息列表（无历史时不渲染消息容器，避免与按钮间出现空白）
   let messagesHTML = ''
   if (chatMessages.length > 0) {
     messagesHTML = '<div class="ai-chat-messages" id="__ai_chat_messages__">'
@@ -844,7 +836,6 @@ function renderChatUI() {
     messagesHTML += '</div>'
   }
   
-  // 获取 token 使用情况
   const tokenUsage = getPageChatTokenUsage()
   let tokenStatusHTML = ''
   if (tokenUsage) {
@@ -857,7 +848,6 @@ function renderChatUI() {
     `
   }
   
-  // 输入区域
   const inputHTML = `
     ${tokenStatusHTML}
     <div class="ai-chat-input-container">
@@ -879,18 +869,15 @@ function renderChatUI() {
   
   chatContainer.innerHTML = messagesHTML + inputHTML
   
-  // 滚动到底部
   const messagesContainer = document.getElementById('__ai_chat_messages__')
   if (messagesContainer) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight
   }
   
-  // 绑定事件
   const input = document.getElementById('__ai_chat_input__') as HTMLTextAreaElement | null
   const submitBtn = document.getElementById('__ai_chat_submit__') as HTMLButtonElement | null
   
   if (input && submitBtn) {
-    // Enter 发送（Shift+Enter 换行）
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
@@ -900,13 +887,10 @@ function renderChatUI() {
       }
     })
     
-    // 提交按钮
     submitBtn.addEventListener('click', () => {
       if (isGeneratingChat) {
-        // 仅停止本次生成，不销毁 session
         abortPageChatGeneration()
         isGeneratingChat = false
-        // 切换按钮与输入框状态（避免整块重渲染导致跳动）
         submitBtn.classList.remove('generating')
         submitBtn.title = 'Send message'
         submitBtn.textContent = '➤'
@@ -918,15 +902,12 @@ function renderChatUI() {
   }
 }
 
-// 处理聊天提交
 async function handleChatSubmit(question: string) {
   const input = document.getElementById('__ai_chat_input__') as HTMLTextAreaElement | null
   if (!input) return
   
-  // 清空输入框
   input.value = ''
   
-  // 添加用户消息
   const userMessage: ChatMessage = {
     role: 'user',
     content: question,
@@ -934,9 +915,7 @@ async function handleChatSubmit(question: string) {
   }
   chatMessages.push(userMessage)
   
-  // 设置生成标志
   isGeneratingChat = true
-  // 切换按钮与输入框状态（避免整块重渲染导致跳动）
   const submitBtn = document.getElementById('__ai_chat_submit__') as HTMLButtonElement | null
   if (submitBtn) {
     submitBtn.classList.add('generating')
@@ -945,7 +924,6 @@ async function handleChatSubmit(question: string) {
   }
   input.disabled = true
   
-  // 将用户消息增量插入到 DOM（避免整块重渲染）
   const messagesContainer = document.getElementById('__ai_chat_messages__') as HTMLDivElement | null
   if (messagesContainer) {
     const userHtml = `
@@ -958,10 +936,8 @@ async function handleChatSubmit(question: string) {
   }
   
   try {
-    // 确保 session 存在（包含当前的聊天历史作为上下文）
     if (!hasPageChatSession()) {
       const targetLang = (await getSetting<string>('targetLang')) || 'en'
-      // 注意：此时 userMessage 已经添加到 chatMessages，所以要排除最后一条
       const historyForSession = chatMessages.slice(0, -1)
       console.log('[Content] Session destroyed, recreating with', historyForSession.length, 'history messages')
       if (historyForSession.length > 0) {
@@ -979,7 +955,6 @@ async function handleChatSubmit(question: string) {
       }
     }
     
-    // 添加一个临时的 assistant 消息用于显示流式内容（增量插入，避免整块重渲染）
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: '',
@@ -999,14 +974,11 @@ async function handleChatSubmit(question: string) {
       messagesContainer2.scrollTop = messagesContainer2.scrollHeight
     }
     
-    // 获取目标语言
     const targetLang = (await getSetting<string>('targetLang')) || 'en'
     
-    // 调用 AI
     const response = await askPageQuestion(question, {
       lang: targetLang,
       onChunk: (chunk) => {
-        // 更新最后一条助手消息（只更新内容避免整块重渲染导致闪烁）
         if (chatMessages.length > 0) {
           chatMessages[chatMessages.length - 1].content = chunk
           const lastEl = document.getElementById('__ai_chat_last_msg__')
@@ -1017,14 +989,12 @@ async function handleChatSubmit(question: string) {
               messagesContainer.scrollTop = messagesContainer.scrollHeight
             }
           } else {
-            // 如果找不到元素（首次或结构变化），回退到重新渲染
             renderChatUI()
           }
         }
       }
     })
     
-    // 如果响应为空（可能是用户停止），仅当完全没有生成内容时移除临时消息
     if (!response || !response.trim()) {
       const lastMsg = chatMessages[chatMessages.length - 1]
       const hasContent = lastMsg && lastMsg.role === 'assistant' && lastMsg.content && lastMsg.content.trim().length > 0
@@ -1033,10 +1003,8 @@ async function handleChatSubmit(question: string) {
       }
     }
     
-    // 更新 token 使用状态显示
     updateTokenStatus()
     
-    // 保存对话历史（使用哈希值标识页面内容）
     const contentHash = await hashText(currentPageText)
     await setPageChatHistory(location.href, {
       messages: chatMessages,
@@ -1045,12 +1013,10 @@ async function handleChatSubmit(question: string) {
     })
   } catch (e: any) {
     console.error('[Chat error]', e)
-    // 如果是用户停止（Abort）且已有部分内容，保留内容不显示错误
     const isAbort = e?.name === 'AbortError' || e?.message?.includes('aborted') || e?.message?.includes('Session destroyed')
     const lastMsg = chatMessages[chatMessages.length - 1]
     const hasContent = lastMsg && lastMsg.role === 'assistant' && lastMsg.content && lastMsg.content.trim().length > 0
     if (!(isAbort && hasContent)) {
-      // 真错误或没有任何生成内容：显示错误
       if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'assistant') {
         chatMessages.pop()
       }
@@ -1073,7 +1039,6 @@ async function handleChatSubmit(question: string) {
     }
   } finally {
     isGeneratingChat = false
-    // 切回发送状态（避免整块重渲染）
     const submitBtn2 = document.getElementById('__ai_chat_submit__') as HTMLButtonElement | null
     const input2 = document.getElementById('__ai_chat_input__') as HTMLTextAreaElement | null
     if (submitBtn2) {
@@ -1130,12 +1095,9 @@ function hideSidePanel() {
 
 ensureTooltip()
 
-// 只在顶层框架创建悬浮球和侧边栏（避免 iframe 中重复创建）
 if (window.self === window.top) {
   ensureFloatingButton()
   
-  // 预加载 keepalive session 以保持 LanguageModel ready
-  // 延迟 2 秒避免影响页面初始加载性能
   setTimeout(() => {
     ensureKeepaliveSession().catch(err => {
       console.log('[AI] Background keepalive session creation skipped:', err.message)
@@ -1143,15 +1105,7 @@ if (window.self === window.top) {
   }, 2000)
 }
 
-/* 诊断 Chrome AI API 状态
-;(async () => {
-  await __diagnoseAI()
-})()
-*/
-
-/** ---------------- 背景消息（右键菜单触发） ---------------- */
 chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
-  // 悬浮球和页面摘要相关消息只在顶层框架处理
   if (window.self !== window.top) {
     return false
   }
@@ -1159,7 +1113,6 @@ chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
   if (msg?.type === 'SHOW_FLOAT_AGAIN') {
     const node = ensureFloatingButton()
     node.style.display = 'block'
-    // 重置到左下角，使用 top 定位保持一致
     node.style.left = '24px'
     node.style.top = `${window.innerHeight - 64 - 24}px`
     node.style.right = 'auto'
@@ -1175,7 +1128,6 @@ chrome.runtime.onMessage.addListener((msg: Msg | any, _s, sendResponse) => {
   return false
 })
 
-// 页面卸载时清理 AI 资源
 window.addEventListener('beforeunload', () => {
   destroyResources()
 })

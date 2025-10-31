@@ -1,6 +1,15 @@
-// src/background/index.ts
+/**
+ * Background Script - Chrome Extension Event Handlers
+ * 
+ * This script runs in the background and handles:
+ * 1. Context menu creation and click events
+ * 2. Keyboard command shortcuts
+ * 3. Messages between background and content scripts
+ * 
+ * It acts as a coordinator between the user's actions (right-click, shortcuts)
+ * and the content script's AI features.
+ */
 
-// 右键菜单
 chrome.runtime.onInstalled.addListener(() => {
     try {
       chrome.contextMenus.create({
@@ -24,20 +33,16 @@ chrome.runtime.onInstalled.addListener(() => {
         contexts: ['selection'],
       })
     } catch (e) {
-      // 重装时重复创建可能会抛错，忽略即可
       void 0
     }
   })
   
-  // 安全发送消息：忽略没有内容脚本的页面造成的报错
   function safeSendMessage(tabId: number, msg: any) {
     try {
       chrome.tabs.sendMessage(tabId, msg, () => {
-        // 如果该页没有注入 content script，会走到 lastError；这里忽略即可
         void chrome.runtime.lastError
       })
     } catch {
-      // 在某些极端场景（tab 已关闭）这里也可能抛错，直接忽略
     }
   }
   
@@ -56,13 +61,11 @@ chrome.runtime.onInstalled.addListener(() => {
         safeSendMessage(tabId, { type: 'EXPLAIN_SELECTION' })
         break
       case 'translate_selection':
-        // 这里默认 zh，你也可以从 storage 读取 targetLang 再发
-        safeSendMessage(tabId, { type: 'TRANSLATE_SELECTION', targetLang: 'zh' })
+        safeSendMessage(tabId, { type: 'TRANSLATE_SELECTION', targetLang: 'en' })
         break
     }
   })
   
-  // 键盘命令（见 manifest "commands"）
   chrome.commands.onCommand.addListener(async (command) => {
     if (command !== 'toggle-panel') return
     try {

@@ -5,8 +5,8 @@ export type Note = {
   sourceUrl: string
   pageTitle: string
   kind: NoteKind
-  text: string         // AI 结果
-  snippet?: string     // 原文片段
+  text: string
+  snippet?: string
   createdAt: number
   lang?: string
 }

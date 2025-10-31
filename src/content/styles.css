@@ -1,4 +1,3 @@
-/* 选区工具条 */
   .ai-tip {
     position: absolute;
     z-index: 2147483647;
@@ -49,7 +48,6 @@
     pointer-events: none;
   }
   
-/* 结果气泡（常驻，直到点击外部或 Esc） */
 .ai-result-bubble {
   position: absolute;
   z-index: 2147483647;
@@ -64,7 +62,6 @@
   word-break: break-word;
 }
 
-/* 气泡内的列表样式 */
 .ai-result-bubble ul {
   margin: 0 !important;
   padding-left: 20px !important;
@@ -115,7 +112,6 @@
   background: #dadce0;
 }
   
-  /* 悬浮球（整页 summary 触发） */
   .ai-float-btn{
     position: fixed;
     width: 64px;
@@ -131,19 +127,16 @@
   .ai-float-btn:hover { transform: scale(1.05); }
   .ai-float-btn.dragging { cursor: grabbing; opacity: .95; }
   
-  /* 内部图标层：铺满容器，负责旋转动画 */
   .ai-float-icon{
     width: 100%;
     height: 100%;
     background: center/contain no-repeat;
-    pointer-events: none; /* 不阻挡拖动/点击 */
+    pointer-events: none;
   }
   
-  /* 旋转动画 */
   @keyframes ai-spin { to { transform: rotate(360deg); } }
   .ai-float-icon.spinning { animation: ai-spin 1s linear infinite; }
   
-  /* 左上角关闭按钮（悬停显示） */
   .ai-float-close{
     position: absolute;
     left: -4px; top: -4px;
@@ -166,10 +159,9 @@
     transform: scale(1);
   }
   
-  /* Tooltip 提示 */
   .ai-float-tooltip {
     position: absolute;
-    left: 72px; /* 悬浮球宽度 64px + 8px 间距 */
+    left: 72px;
     top: 0;
     white-space: nowrap;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -188,7 +180,6 @@
     z-index: 2147483648;
   }
   
-  /* Tooltip 箭头 */
   .ai-float-tooltip::before {
     content: '';
     position: absolute;
@@ -201,14 +192,12 @@
     border-color: transparent #667eea transparent transparent;
   }
   
-  /* 悬停时显示 tooltip */
   .ai-float-tooltip.visible {
     opacity: 1;
     visibility: visible;
     transform: translateX(0);
   }
 
-  /* 侧边栏 */
   .ai-sidepanel {
     position: fixed;
     top: 0; right: -480px;
@@ -278,7 +267,6 @@
     min-height: 0;
   }
   
-  /* 内容区域包装器 */
   .ai-panel-content-wrapper {
     flex: 1;
     overflow-y: auto;
@@ -286,7 +274,6 @@
     background: #f8f9fa;
   }
   
-/* 实际文本内容 */
 .ai-panel-text {
   white-space: pre-wrap;
   color: #202124 !important;
@@ -296,7 +283,6 @@
   word-wrap: break-word;
 }
   
-  /* 按钮区域 - 固定在底部 */
   .ai-panel-actions { 
     display: flex !important;
     gap: 8px !important;
@@ -335,7 +321,7 @@
     font-size: 14px !important;
   }
   .ai-panel-actions button#__ai_save_page_note__:disabled::before {
-    content: '' !important;  /* 已保存状态不显示图标 */
+    content: '' !important;
   }
   .ai-panel-actions button#__ai_refresh_summary__ {
     background: linear-gradient(135deg, #4285f4, #34a853) !important;

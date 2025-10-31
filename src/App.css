@@ -180,7 +180,6 @@ html, body {
   flex-shrink: 0;
 }
 
-/* 最后一行（按钮区域）不需要底部边框 */
 .popup-root > .row:last-child {
   border-bottom: none;
   border-top: 1px solid #e8eaed;
@@ -216,7 +215,6 @@ html, body {
   min-height: 0;
 }
 
-/* 当有卡片内容时，添加内边距 */
 .note-list:has(.note-card) {
   padding: 8px;
   min-height: 200px;

@@ -1,13 +1,27 @@
-// src/services/storage.ts
+/**
+ * Storage Service - Chrome Storage API Wrapper
+ * 
+ * Provides a typed, promise-based interface for managing extension data:
+ * - Notes: AI-generated summaries, explanations, translations
+ * - Settings: User preferences (target language, UI state)
+ * - Page Summaries: Cached full-page summaries (URL-keyed)
+ * - Chat History: Multi-turn conversation history (URL-keyed)
+ * 
+ * All data is stored in chrome.storage.local for persistence across sessions.
+ */
+
 import type { Note } from '../utils/messaging'
 
+// Storage keys
 const NOTES_KEY = 'notes'
 const SETTINGS_KEY = 'settings'
 const PAGE_SUMMARIES_KEY = 'pageSummaries'
 const PAGE_CHAT_HISTORY_KEY = 'pageChatHistory'
 
-// ------ 哈希工具函数 ------
-// 使用 SHA-256 生成文本的哈希值（高效比较页面内容是否变化）
+/**
+ * Generate SHA-256 hash of text
+ * Used for efficiently comparing page content changes without storing full text
+ */
 export async function hashText(text: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(text)
@@ -16,61 +30,99 @@ export async function hashText(text: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// ------ 小工具：Promise 封装 ------
+/**
+ * Promise wrapper for chrome.storage.local.get
+ */
 function getLocal<T = any>(key: string): Promise<T | undefined> {
   return new Promise((resolve) => {
     chrome.storage.local.get([key], (res) => resolve(res[key] as T | undefined))
   })
 }
+
+/**
+ * Promise wrapper for chrome.storage.local.set
+ */
 function setLocal(obj: Record<string, any>): Promise<void> {
   return new Promise((resolve) => chrome.storage.local.set(obj, () => resolve()))
 }
 
-// ------ Notes API ------
+// ============================================================================
+// Notes API
+// ============================================================================
+
+/**
+ * Add a new note to storage
+ * Notes are prepended (newest first)
+ */
 export async function addNote(n: Note) {
   const list = (await getLocal<Note[]>(NOTES_KEY)) || []
-  list.unshift(n) // 最新在前
+  list.unshift(n)  // Add to beginning
   await setLocal({ [NOTES_KEY]: list })
 }
 
+/**
+ * Get all notes, sorted by creation date (newest first)
+ */
 export async function listNotes(): Promise<Note[]> {
   const list = (await getLocal<Note[]>(NOTES_KEY)) || []
-  // 保险按时间排一下
   return list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 }
 
+/**
+ * Delete all notes
+ */
 export async function clearNotes() {
   await setLocal({ [NOTES_KEY]: [] })
 }
 
-// ------ Settings API ------
+// ============================================================================
+// Settings API
+// ============================================================================
+
 type Settings = Record<string, any>
 
+/**
+ * Save a setting value
+ * Common settings: 'targetLang', 'showWelcomeBanner', 'floatPos', 'floatHidden'
+ */
 export async function setSetting(key: string, val: any) {
   const st = (await getLocal<Settings>(SETTINGS_KEY)) || {}
   st[key] = val
   await setLocal({ [SETTINGS_KEY]: st })
 }
 
+/**
+ * Get a setting value
+ */
 export async function getSetting<T = any>(key: string): Promise<T | undefined> {
   const st = (await getLocal<Settings>(SETTINGS_KEY)) || {}
   return st[key] as T | undefined
 }
 
-// ------ Page Summary Cache API ------
+// ============================================================================
+// Page Summary Cache API
+// ============================================================================
+
 export type PageSummaryCache = {
-  summary: string
-  text: string
-  contentHash: string  // 页面内容的哈希值（用于高效比较）
-  timestamp: number
-  isSaved?: boolean  // 是否已保存到笔记
+  summary: string        // The generated summary
+  text: string           // The original page text
+  contentHash: string    // Hash of page content (for detecting changes)
+  timestamp: number      // When the summary was created
+  isSaved?: boolean      // Whether saved to notes
 }
 
+/**
+ * Get cached page summary for a URL
+ */
 export async function getPageSummary(url: string): Promise<PageSummaryCache | undefined> {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
   return cache[url]
 }
 
+/**
+ * Cache a page summary
+ * Automatically computes content hash for change detection
+ */
 export async function setPageSummary(url: string, summary: string, text: string) {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
   const contentHash = await hashText(text)
@@ -78,6 +130,9 @@ export async function setPageSummary(url: string, summary: string, text: string)
   await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
 }
 
+/**
+ * Update whether the page summary has been saved to notes
+ */
 export async function updatePageSummarySaveStatus(url: string, isSaved: boolean) {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
   if (cache[url]) {
@@ -86,13 +141,19 @@ export async function updatePageSummarySaveStatus(url: string, isSaved: boolean)
   }
 }
 
+/**
+ * Clear cached page summary for a URL
+ */
 export async function clearPageSummary(url: string) {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
   delete cache[url]
   await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
 }
 
-// ------ Page Chat History API ------
+// ============================================================================
+// Page Chat History API
+// ============================================================================
+
 export type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
@@ -100,23 +161,35 @@ export type ChatMessage = {
 }
 
 export type PageChatHistory = {
-  messages: ChatMessage[]
-  contentHash: string  // 页面内容的哈希值（用于验证页面内容是否变化）
-  pageSummary: string  // 初始的页面摘要
-  timestamp: number
+  messages: ChatMessage[]    // Conversation history
+  contentHash: string        // Hash of page content (for validation)
+  pageSummary: string        // Initial page summary (context for chat)
+  timestamp: number          // Last update time
 }
 
+/**
+ * Get chat history for a URL
+ * Returns undefined if no history exists or page content has changed
+ */
 export async function getPageChatHistory(url: string): Promise<PageChatHistory | undefined> {
   const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
   return cache[url]
 }
 
+/**
+ * Save chat history for a URL
+ * Should be called after each chat turn to persist conversation
+ */
 export async function setPageChatHistory(url: string, history: Omit<PageChatHistory, 'timestamp'>) {
   const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
   cache[url] = { ...history, timestamp: Date.now() }
   await setLocal({ [PAGE_CHAT_HISTORY_KEY]: cache })
 }
 
+/**
+ * Clear chat history for a URL
+ * Called when page content changes or user explicitly refreshes
+ */
 export async function clearPageChatHistory(url: string) {
   const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
   delete cache[url]

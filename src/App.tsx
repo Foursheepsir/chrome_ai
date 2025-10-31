@@ -3,60 +3,65 @@ import { listNotes, clearNotes, getSetting, setSetting } from './services/storag
 import type { Note } from './utils/messaging'
 import './App.css'
 
+/**
+ * Main Popup Component
+ * 
+ * This is the popup UI that appears when clicking the extension icon.
+ * It displays saved notes, allows searching/filtering, and provides controls
+ * for language selection, export, and clearing notes.
+ */
 export default function App() {
-  const [notes, setNotes] = useState<Note[]>([])
-  const [q, setQ] = useState('')
-  const [lang, setLang] = useState('zh')
-  const [showWelcome, setShowWelcome] = useState<boolean | null>(null)
+  // State management
+  const [notes, setNotes] = useState<Note[]>([])           // All saved notes
+  const [q, setQ] = useState('')                            // Search query
+  const [lang, setLang] = useState('en')                    // Target language for AI operations
+  const [showWelcome, setShowWelcome] = useState<boolean | null>(null)  // Welcome banner visibility
 
-  // 初始化：加载笔记 & 读取语言；并通知当前页显示悬浮球
+  // Initialize popup on mount
   useEffect(() => {
     (async () => {
+      // Load all saved notes
       setNotes(await listNotes())
       
-      // 读取语言设置
+      // Load or initialize target language setting
       const saved = await getSetting<string>('targetLang')
       if (saved) {
         setLang(saved)
         console.log('[Popup] Loaded target language from storage:', saved)
       } else {
-        // 如果没有保存过，使用默认值 'en' 并保存到 storage
         const defaultLang = 'en'
         await setSetting('targetLang', defaultLang)
         setLang(defaultLang)
         console.log('[Popup] No saved language, using default:', defaultLang)
       }
       
-      // 读取 welcome banner 显示状态
+      // Load or initialize welcome banner visibility
       const welcomeVisible = await getSetting<boolean>('showWelcomeBanner')
       if (welcomeVisible !== undefined) {
         setShowWelcome(welcomeVisible)
         console.log('[Popup] Loaded welcome banner state:', welcomeVisible)
       } else {
-        // 默认显示
         await setSetting('showWelcomeBanner', true)
         setShowWelcome(true)
       }
     })()
 
-    // 打开 popup 时，让 content 端把悬浮球重新显示到右下角
+    // Tell content script to show the floating button again (if it was hidden)
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const id = tabs[0]?.id
       if (id) {
         try {
           chrome.tabs.sendMessage(id, { type: 'SHOW_FLOAT_AGAIN' }, () => {
-            // 忽略无监听端的错误
             void chrome.runtime.lastError
           })
         } catch { /* no-op */ }
       }
     })
 
-    // 监听存储变化（notes 实时刷新）
+    // Listen for storage changes to sync notes in real-time
     function onChanged(changes: Record<string, chrome.storage.StorageChange>, area: string) {
       if (area === 'local' && changes.notes) {
         const v = (changes.notes.newValue || []) as Note[]
-        // 按时间排序，最新在前
         setNotes(v.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
       }
     }
@@ -64,6 +69,7 @@ export default function App() {
     return () => chrome.storage.onChanged.removeListener(onChanged)
   }, [])
 
+  // Filter notes based on search query (searches in text, snippet, and page title)
   const filtered = useMemo(
     () =>
       notes.filter((n) =>
@@ -74,12 +80,18 @@ export default function App() {
     [notes, q]
   )
 
+  /**
+   * Toggle welcome banner visibility and persist the setting
+   */
   const toggleWelcome = async (show: boolean) => {
     setShowWelcome(show)
     await setSetting('showWelcomeBanner', show)
     console.log('[Popup] Welcome banner state changed to:', show)
   }
 
+  /**
+   * Export all notes as a JSON file
+   */
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -90,14 +102,15 @@ export default function App() {
     URL.revokeObjectURL(url)
   }
 
-  // 渲染 markdown 列表为 HTML
+  /**
+   * Simple markdown renderer for list items
+   * Converts markdown lists (- or *) to HTML <ul>/<li> elements
+   */
   const renderMarkdown = (text: string) => {
-    // 检测是否是 markdown 列表
     const lines = text.split('\n')
     const isMarkdownList = lines.some(line => /^[-*]\s/.test(line.trim()))
     
     if (isMarkdownList) {
-      // 转换为 HTML 列表
       const listItems = lines
         .filter(line => line.trim())
         .map(line => {
@@ -110,7 +123,6 @@ export default function App() {
       return <ul style={{ margin: 0, paddingLeft: '20px' }}>{listItems}</ul>
     }
     
-    // 不是列表，使用普通文本
     return text
   }
 
@@ -174,7 +186,6 @@ export default function App() {
             console.log('[Popup] Target language changed to:', v)
           }}
         >
-          <option value="zh">中文</option>
           <option value="en">English</option>
           <option value="ja">日本語</option>
           <option value="es">Español</option>
