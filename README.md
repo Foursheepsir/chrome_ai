@@ -39,8 +39,7 @@ If you only want to try the extension, you do NOT need Node.js.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-org-or-user/chrome_ai.git
-   cd chrome_ai
+   git clone https://github.com/Foursheepsir/chrome_ai.git && cd chrome_ai
    ```
 
 2. Complete Chrome built‑in AI setup: see [AI Setup Guide](./AI_SETUP.md)
