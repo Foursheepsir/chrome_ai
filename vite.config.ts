@@ -5,5 +5,13 @@ import manifest from './manifest.json'
 
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
-  build: { sourcemap: true }
+  build: {
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Disable code splitting for content scripts to avoid dynamic import issues
+        manualChunks: undefined
+      }
+    }
+  }
 })
