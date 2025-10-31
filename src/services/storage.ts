@@ -4,6 +4,7 @@ import type { Note } from '../utils/messaging'
 const NOTES_KEY = 'notes'
 const SETTINGS_KEY = 'settings'
 const PAGE_SUMMARIES_KEY = 'pageSummaries'
+const PAGE_CHAT_HISTORY_KEY = 'pageChatHistory'
 
 // ------ 小工具：Promise 封装 ------
 function getLocal<T = any>(key: string): Promise<T | undefined> {
@@ -68,4 +69,35 @@ export async function clearPageSummary(url: string) {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
   delete cache[url]
   await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
+}
+
+// ------ Page Chat History API ------
+export type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+}
+
+export type PageChatHistory = {
+  messages: ChatMessage[]
+  pageText: string  // 用于验证页面内容是否变化
+  pageSummary: string  // 初始的页面摘要
+  timestamp: number
+}
+
+export async function getPageChatHistory(url: string): Promise<PageChatHistory | undefined> {
+  const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
+  return cache[url]
+}
+
+export async function setPageChatHistory(url: string, history: PageChatHistory) {
+  const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
+  cache[url] = { ...history, timestamp: Date.now() }
+  await setLocal({ [PAGE_CHAT_HISTORY_KEY]: cache })
+}
+
+export async function clearPageChatHistory(url: string) {
+  const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
+  delete cache[url]
+  await setLocal({ [PAGE_CHAT_HISTORY_KEY]: cache })
 }

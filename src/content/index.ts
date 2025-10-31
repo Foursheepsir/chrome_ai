@@ -1,6 +1,6 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession } from '../services/aiService'
-import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary } from '../services/storage'
+import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession } from '../services/aiService'
+import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, getPageChatHistory, setPageChatHistory, clearPageChatHistory, type ChatMessage } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 
@@ -217,35 +217,66 @@ function escapeHtml(str: string) {
   return div.innerHTML
 }
 
-// 简单的 markdown 渲染（支持列表）
+// 轻量 markdown 渲染器（支持粗体、斜体、列表、代码、链接）
 function renderMarkdown(text: string): string {
-  // 先去除首尾空白，避免多余的空行
-  const trimmedText = text.trim()
+  if (!text) return ''
   
-  // 检测是否是 markdown 列表格式
-  const lines = trimmedText.split('\n')
-  const isMarkdownList = lines.some(line => /^[-*]\s/.test(line.trim()))
-  
-  if (isMarkdownList) {
-    // 将 markdown 列表转换为 HTML 列表
-    let html = '<ul style="margin: 0; padding-left: 20px;">'
-    lines.forEach(line => {
-      const trimmed = line.trim()
-      if (/^[-*]\s/.test(trimmed)) {
-        // 列表项
-        const content = trimmed.replace(/^[-*]\s/, '')
-        html += `<li>${escapeHtml(content)}</li>`
-      } else if (trimmed) {
-        // 非列表项的文本
-        html += `<li>${escapeHtml(trimmed)}</li>`
-      }
-    })
-    html += '</ul>'
-    return html
+  // 处理内联 markdown 的函数（粗体、斜体、代码、链接）
+  function processInline(str: string): string {
+    let result = escapeHtml(str)
+    // 链接 [text](url)
+    result = result.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // 粗体 **text** （先处理粗体，避免和斜体冲突）
+    result = result.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
+    // 行内代码 `code`
+    result = result.replace(/`([^`]+)`/g, '<code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: monospace;">$1</code>')
+    return result
   }
   
-  // 不是列表，使用普通格式
-  return escapeHtml(trimmedText).replace(/\n/g, '<br/>')
+  const lines = text.trim().split('\n')
+  const result: string[] = []
+  let inList = false
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    
+    // 空行
+    if (!trimmed) {
+      if (inList) {
+        result.push('</ul>')
+        inList = false
+      }
+      continue
+    }
+    
+    // 列表项：支持 * 或 - 后面跟1个或多个空格
+    const listMatch = trimmed.match(/^[-*]\s+(.*)$/)
+    if (listMatch) {
+      if (!inList) {
+        result.push('<ul style="margin: 8px 0; padding-left: 24px; list-style-type: disc;">')
+        inList = true
+      }
+      result.push(`<li style="margin: 4px 0;">${processInline(listMatch[1])}</li>`)
+      continue
+    }
+    
+    // 非列表项
+    if (inList) {
+      result.push('</ul>')
+      inList = false
+    }
+    
+    // 普通段落
+    result.push(`<p style="margin: 8px 0;">${processInline(trimmed)}</p>`)
+  }
+  
+  // 关闭未闭合的列表
+  if (inList) {
+    result.push('</ul>')
+  }
+  
+  return result.join('')
 }
 
 /** ---------------- 选区按钮行为 ---------------- */
@@ -382,6 +413,13 @@ let sidePanelEl: HTMLDivElement | null = null
 let sidePanelContentEl: HTMLDivElement | null = null
 let sidePanelOpen = false
 let isGeneratingPageSummary = false  // 防止重复生成页面摘要
+
+// Page Chat 相关状态
+let chatMessages: ChatMessage[] = []  // 当前对话历史
+let currentPageText = ''  // 当前页面文本
+let currentPageSummary = ''  // 当前页面摘要
+let isChatMode = false  // 是否在聊天模式
+let isGeneratingChat = false  // 是否正在生成聊天回复
 
 function ensureFloatingButton() {
     if (floatBtnEl) return floatBtnEl
@@ -595,6 +633,22 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       // 保存到缓存
       await setPageSummary(currentUrl, res, text)
       
+      // 保存到全局状态（用于 chat）
+      currentPageText = text
+      currentPageSummary = res
+      
+      // 尝试加载对话历史
+      const chatHistory = await getPageChatHistory(currentUrl)
+      if (chatHistory && chatHistory.pageText === text) {
+        // 页面内容没变，恢复对话历史
+        console.log('[AI] Restoring chat history:', chatHistory.messages.length, 'messages')
+        chatMessages = chatHistory.messages
+      } else {
+        // 页面内容变了或没有历史，清空
+        chatMessages = []
+        await clearPageChatHistory(currentUrl)
+      }
+      
       // 显示最终结果和按钮（启用状态）
       renderPageSummary(res, text)
     } catch (e) {
@@ -607,55 +661,329 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
 }
 
 function renderPageSummary(summary: string, text: string) {
-  sidePanelContentEl!.innerHTML = `
+  // 构建基础 HTML
+  let html = `
     <div class="ai-panel-content-wrapper">
       <div class="ai-panel-text">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
     </div>
     <div class="ai-panel-actions">
       <button id="__ai_save_page_note__">Save to Notes</button>
       <button id="__ai_refresh_summary__">🔄 Refresh</button>
+      <button id="__ai_ask_followup__">💬 Ask Follow-up</button>
     </div>
   `
   
+  // 如果有对话历史，渲染聊天界面
+  if (chatMessages.length > 0 || isChatMode) {
+    html += `<div id="__ai_chat_container__" class="ai-chat-container"></div>`
+  }
+  
+  sidePanelContentEl!.innerHTML = html
+  
+  // Save button
   const saveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
   saveBtn?.addEventListener('click', async () => {
-    // 防止重复保存
     if (saveBtn.disabled) return
-    
-    // 禁用按钮并显示保存状态
     saveBtn.disabled = true
     saveBtn.textContent = 'Saving...'
-    
     try {
       await saveNoteToStore('summary', summary, text.slice(0, 300))
       saveBtn.textContent = 'Saved ✓'
     } catch (e) {
       console.error('[Save error]', e)
-      // 保存失败，恢复按钮状态
       saveBtn.disabled = false
       saveBtn.textContent = 'Save to Notes'
     }
   })
   
+  // Refresh button - 清空一切，重新开始
   const refreshBtn = document.getElementById('__ai_refresh_summary__') as HTMLButtonElement | null
   refreshBtn?.addEventListener('click', async () => {
-    // 防止重复生成
-    if (isGeneratingPageSummary) {
-      console.log('[AI] Already generating, ignoring refresh request')
-      return
+    if (isGeneratingPageSummary || isGeneratingChat) {
+      console.log('[AI] Generation in progress, canceling and refreshing')
     }
     
-    // 禁用按钮直到生成完成
-    if (refreshBtn) refreshBtn.disabled = true
+    // 停止当前生成
+    abortSummarize()
+    destroyPageChatSession()
     
-    try {
-      await clearPageSummary(location.href)
-      await openPanelAndSummarizePage(true)
-    } finally {
-      // 重新启用按钮
-      if (refreshBtn) refreshBtn.disabled = false
+    // 清空状态
+    isChatMode = false
+    isGeneratingChat = false
+    chatMessages = []
+    currentPageText = ''
+    currentPageSummary = ''
+    
+    // 清空缓存
+    await clearPageSummary(location.href)
+    await clearPageChatHistory(location.href)
+    
+    // 重新生成
+    await openPanelAndSummarizePage(true)
+  })
+  
+  // Ask Follow-up button
+  const askBtn = document.getElementById('__ai_ask_followup__') as HTMLButtonElement | null
+  askBtn?.addEventListener('click', async () => {
+    if (!isChatMode) {
+      // 第一次点击，进入聊天模式
+      isChatMode = true
+      
+      // 创建 chat session
+      const targetLang = (await getSetting<string>('targetLang')) || 'en'
+      const success = await createPageChatSession({
+        pageText: currentPageText,
+        pageSummary: currentPageSummary,
+        lang: targetLang
+      })
+      
+      if (!success) {
+        isChatMode = false
+        alert('Failed to initialize chat session. Please try again.')
+        return
+      }
+      
+      // 重新渲染整个面板以显示聊天界面
+      renderPageSummary(currentPageSummary, currentPageText)
     }
   })
+  
+  // 如果已经在聊天模式或有历史，渲染聊天UI
+  if (chatMessages.length > 0 || isChatMode) {
+    renderChatUI()
+  }
+}
+
+// 渲染聊天 UI
+function renderChatUI() {
+  const chatContainer = document.getElementById('__ai_chat_container__')
+  if (!chatContainer) return
+  
+  // 构建聊天消息列表（无历史时不渲染消息容器，避免与按钮间出现空白）
+  let messagesHTML = ''
+  if (chatMessages.length > 0) {
+    messagesHTML = '<div class="ai-chat-messages" id="__ai_chat_messages__">'
+    chatMessages.forEach((msg, idx) => {
+      const className = msg.role === 'user' ? 'ai-chat-message-user' : 'ai-chat-message-assistant'
+      const contentHtml = msg.role === 'assistant'
+        ? renderMarkdown(msg.content)
+        : escapeHtml(msg.content).replace(/\n/g, '<br/>')
+      const isLastAssistantStreaming = isGeneratingChat && idx === chatMessages.length - 1 && msg.role === 'assistant'
+      messagesHTML += `
+        <div class="${className}">
+          <div class="ai-chat-message-content" ${isLastAssistantStreaming ? 'id="__ai_chat_last_msg__"' : ''}>${contentHtml}</div>
+        </div>
+      `
+    })
+    messagesHTML += '</div>'
+  }
+  
+  // 输入区域
+  const inputHTML = `
+    <div class="ai-chat-input-container">
+      <textarea 
+        id="__ai_chat_input__" 
+        class="ai-chat-input" 
+        placeholder="Ask anything about this page..."
+        ${isGeneratingChat ? 'disabled' : ''}
+      ></textarea>
+      <button 
+        id="__ai_chat_submit__" 
+        class="ai-chat-submit ${isGeneratingChat ? 'generating' : ''}"
+        ${isGeneratingChat ? 'title="Stop generating"' : 'title="Send message"'}
+      >
+        ${isGeneratingChat ? '⬛' : '➤'}
+      </button>
+    </div>
+  `
+  
+  chatContainer.innerHTML = messagesHTML + inputHTML
+  
+  // 滚动到底部
+  const messagesContainer = document.getElementById('__ai_chat_messages__')
+  if (messagesContainer) {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight
+  }
+  
+  // 绑定事件
+  const input = document.getElementById('__ai_chat_input__') as HTMLTextAreaElement | null
+  const submitBtn = document.getElementById('__ai_chat_submit__') as HTMLButtonElement | null
+  
+  if (input && submitBtn) {
+    // Enter 发送（Shift+Enter 换行）
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        if (!isGeneratingChat && input.value.trim()) {
+          handleChatSubmit(input.value.trim())
+        }
+      }
+    })
+    
+    // 提交按钮
+    submitBtn.addEventListener('click', () => {
+      if (isGeneratingChat) {
+        // 停止生成
+        destroyPageChatSession()
+        isGeneratingChat = false
+        // 切换按钮与输入框状态（避免整块重渲染导致跳动）
+        submitBtn.classList.remove('generating')
+        submitBtn.title = 'Send message'
+        submitBtn.textContent = '➤'
+        if (input) input.disabled = false
+      } else if (input.value.trim()) {
+        handleChatSubmit(input.value.trim())
+      }
+    })
+  }
+}
+
+// 处理聊天提交
+async function handleChatSubmit(question: string) {
+  const input = document.getElementById('__ai_chat_input__') as HTMLTextAreaElement | null
+  if (!input) return
+  
+  // 清空输入框
+  input.value = ''
+  
+  // 添加用户消息
+  const userMessage: ChatMessage = {
+    role: 'user',
+    content: question,
+    timestamp: Date.now()
+  }
+  chatMessages.push(userMessage)
+  
+  // 设置生成标志
+  isGeneratingChat = true
+  // 切换按钮与输入框状态（避免整块重渲染导致跳动）
+  const submitBtn = document.getElementById('__ai_chat_submit__') as HTMLButtonElement | null
+  if (submitBtn) {
+    submitBtn.classList.add('generating')
+    submitBtn.title = 'Stop generating'
+    submitBtn.textContent = '⬛'
+  }
+  input.disabled = true
+  
+  // 将用户消息增量插入到 DOM（避免整块重渲染）
+  const messagesContainer = document.getElementById('__ai_chat_messages__') as HTMLDivElement | null
+  if (messagesContainer) {
+    const userHtml = `
+      <div class="ai-chat-message-user">
+        <div class="ai-chat-message-content">${escapeHtml(userMessage.content).replace(/\n/g, '<br/>')}</div>
+      </div>
+    `
+    messagesContainer.insertAdjacentHTML('beforeend', userHtml)
+    messagesContainer.scrollTop = messagesContainer.scrollHeight
+  }
+  
+  try {
+    // 确保 session 存在
+    if (!hasPageChatSession()) {
+      const targetLang = (await getSetting<string>('targetLang')) || 'en'
+      const success = await createPageChatSession({
+        pageText: currentPageText,
+        pageSummary: currentPageSummary,
+        lang: targetLang
+      })
+      
+      if (!success) {
+        throw new Error('Failed to create chat session')
+      }
+    }
+    
+    // 添加一个临时的 assistant 消息用于显示流式内容（增量插入，避免整块重渲染）
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now()
+    }
+    chatMessages.push(assistantMessage)
+    const existingLast = document.getElementById('__ai_chat_last_msg__')
+    if (existingLast) existingLast.removeAttribute('id')
+    const messagesContainer2 = document.getElementById('__ai_chat_messages__') as HTMLDivElement | null
+    if (messagesContainer2) {
+      const assistantHtml = `
+        <div class="ai-chat-message-assistant">
+          <div class="ai-chat-message-content" id="__ai_chat_last_msg__"></div>
+        </div>
+      `
+      messagesContainer2.insertAdjacentHTML('beforeend', assistantHtml)
+      messagesContainer2.scrollTop = messagesContainer2.scrollHeight
+    }
+    
+    // 获取目标语言
+    const targetLang = (await getSetting<string>('targetLang')) || 'en'
+    
+    // 调用 AI
+    const response = await askPageQuestion(question, {
+      lang: targetLang,
+      onChunk: (chunk) => {
+        // 更新最后一条助手消息（只更新内容避免整块重渲染导致闪烁）
+        if (chatMessages.length > 0) {
+          chatMessages[chatMessages.length - 1].content = chunk
+          const lastEl = document.getElementById('__ai_chat_last_msg__')
+          if (lastEl) {
+            lastEl.innerHTML = renderMarkdown(chunk)
+            const messagesContainer = document.getElementById('__ai_chat_messages__')
+            if (messagesContainer) {
+              messagesContainer.scrollTop = messagesContainer.scrollHeight
+            }
+          } else {
+            // 如果找不到元素（首次或结构变化），回退到重新渲染
+            renderChatUI()
+          }
+        }
+      }
+    })
+    
+    // 如果响应为空（被中止），移除临时消息
+    if (!response || !response.trim()) {
+      chatMessages.pop()
+    }
+    
+    // 保存对话历史
+    await setPageChatHistory(location.href, {
+      messages: chatMessages,
+      pageText: currentPageText,
+      pageSummary: currentPageSummary,
+      timestamp: Date.now()
+    })
+  } catch (e) {
+    console.error('[Chat error]', e)
+    // 移除临时的 assistant 消息
+    if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'assistant') {
+      chatMessages.pop()
+    }
+    // 添加错误消息
+    const errorMsg: ChatMessage = {
+      role: 'assistant',
+      content: '⚠️ Failed to get response. Please try again.',
+      timestamp: Date.now()
+    }
+    chatMessages.push(errorMsg)
+    const messagesContainer3 = document.getElementById('__ai_chat_messages__') as HTMLDivElement | null
+    if (messagesContainer3) {
+      const errHtml = `
+        <div class="ai-chat-message-assistant">
+          <div class="ai-chat-message-content">${escapeHtml(errorMsg.content).replace(/\n/g, '<br/>')}</div>
+        </div>
+      `
+      messagesContainer3.insertAdjacentHTML('beforeend', errHtml)
+      messagesContainer3.scrollTop = messagesContainer3.scrollHeight
+    }
+  } finally {
+    isGeneratingChat = false
+    // 切回发送状态（避免整块重渲染）
+    const submitBtn2 = document.getElementById('__ai_chat_submit__') as HTMLButtonElement | null
+    const input2 = document.getElementById('__ai_chat_input__') as HTMLTextAreaElement | null
+    if (submitBtn2) {
+      submitBtn2.classList.remove('generating')
+      submitBtn2.title = 'Send message'
+      submitBtn2.textContent = '➤'
+    }
+    if (input2) input2.disabled = false
+  }
 }
 
 function ensureSidePanel() {
