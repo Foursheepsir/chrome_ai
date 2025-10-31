@@ -324,7 +324,7 @@ export async function summarize(text: string, opts: SummOpts = {}): Promise<stri
   const wordCount = text.trim().split(/\s+/).length
   if (wordCount < 10) {
     const warningMsg = '⚠️ Selected content is too short for summarization. Please select at least 10 words.'
-    console.warn('[AI] ❌ Text too short for summarization: only', wordCount, 'words')
+    console.log('[AI] ❌ Text too short for summarization: only', wordCount, 'words')
     optsWithDefaults.onChunk?.(warningMsg)
     return warningMsg
   }
@@ -569,9 +569,9 @@ export async function explain(term: string, opts: ExplainOpts = {}): Promise<str
     // 检查清理后的内容长度
     if (cleanedTerm.length < 3) {
       const errorMsg = '⚠️ Selected content is too short or invalid. Please select something else and try again.'
-      console.warn('[AI] ❌ Invalid input: cleaned term length =', cleanedTerm.length)
-      console.warn('[AI] Original term:', term)
-      console.warn('[AI] Cleaned term:', cleanedTerm)
+      console.log('[AI] ❌ Invalid input: cleaned term length =', cleanedTerm.length)
+      console.log('[AI] Original term:', term)
+      console.log('[AI] Cleaned term:', cleanedTerm)
       optsWithDefaults.onChunk?.(errorMsg)
       return errorMsg
     }
@@ -687,13 +687,20 @@ Output language: ${optsWithDefaults.lang}.`
       console.log('[AI] Result length:', result.length)
       
       return result
-    } catch (streamError) {
-      console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
+    } catch (streamError: any) {
+      // 用户主动操作导致的中止：不做降级重试，直接结束
+      if (streamError?.name === 'AbortError') {
+        console.log('[AI] Explain streaming aborted by user (no fallback)')
+        return ''
+      }
       
-      // 检查 session 是否仍然有效
+      // 其他错误才考虑降级
+      console.error('[AI] Streaming error (non-abort), trying non-streaming approach:', streamError)
+      
+      // 如果 session 已被销毁，则直接返回空
       if (!currentExplainSession) {
-        console.error('[AI] Session is null, cannot retry with non-streaming')
-        throw streamError
+        console.log('[AI] Explain session missing after streaming error, returning empty result')
+        return ''
       }
       
       // 创建新的 AbortController，避免使用已中止的 signal
@@ -1132,7 +1139,7 @@ export async function askPageQuestion(question: string, opts: { lang?: string; o
     
     if (cleanedQuestion.length < 2) {
       const errorMsg = '⚠️ Question is too short. Please ask a meaningful question.'
-      console.warn('[AI] Question too short:', cleanedQuestion.length)
+      console.log('[AI] Question too short:', cleanedQuestion.length)
       opts.onChunk?.(errorMsg)
       return errorMsg
     }
@@ -1166,11 +1173,19 @@ export async function askPageQuestion(question: string, opts: { lang?: string; o
       }
       
       return result
-    } catch (streamError) {
-      console.error('[AI] Streaming error, trying non-streaming approach:', streamError)
+    } catch (streamError: any) {
+      // 如果是用户点击 Stop 导致的中止，直接结束，不做降级重试
+      if (streamError?.name === 'AbortError') {
+        console.log('[AI] Streaming aborted by user (no fallback)')
+        return ''
+      }
+      
+      console.error('[AI] Streaming error (non-abort), trying non-streaming approach:', streamError)
       
       if (!currentPageChatSession) {
-        throw new Error('Session destroyed during streaming')
+        // 不存在 session 多半是外部销毁，这里不要当作错误传播
+        console.log('[AI] Session missing after streaming error, returning empty result')
+        return ''
       }
       
       const retryAbortController = new AbortController()
@@ -1222,6 +1237,20 @@ export function destroyPageChatSession() {
     }
   } catch (e) {
     console.warn('[AI] Error destroying page chat session:', e)
+  }
+}
+
+// 仅中止当前的 page chat 生成，不销毁 session（用于 Stop 按钮）
+export function abortPageChatGeneration() {
+  try {
+    if (currentPageChatAbortController) {
+      currentPageChatAbortController.abort()
+      console.log('[AI] Abort requested for page chat generation')
+      // 为下一次生成准备新的 AbortController
+      currentPageChatAbortController = new AbortController()
+    }
+  } catch (e) {
+    console.warn('[AI] Error aborting page chat generation:', e)
   }
 }
 

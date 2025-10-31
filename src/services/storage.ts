@@ -63,6 +63,7 @@ export type PageSummaryCache = {
   text: string
   contentHash: string  // 页面内容的哈希值（用于高效比较）
   timestamp: number
+  isSaved?: boolean  // 是否已保存到笔记
 }
 
 export async function getPageSummary(url: string): Promise<PageSummaryCache | undefined> {
@@ -73,8 +74,16 @@ export async function getPageSummary(url: string): Promise<PageSummaryCache | un
 export async function setPageSummary(url: string, summary: string, text: string) {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
   const contentHash = await hashText(text)
-  cache[url] = { summary, text, contentHash, timestamp: Date.now() }
+  cache[url] = { summary, text, contentHash, timestamp: Date.now(), isSaved: false }
   await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
+}
+
+export async function updatePageSummarySaveStatus(url: string, isSaved: boolean) {
+  const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
+  if (cache[url]) {
+    cache[url].isSaved = isSaved
+    await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
+  }
 }
 
 export async function clearPageSummary(url: string) {

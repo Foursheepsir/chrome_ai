@@ -326,6 +326,16 @@
   }
   .ai-panel-actions button#__ai_save_page_note__ {
     background: linear-gradient(135deg, #667eea, #764ba2) !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+  .ai-panel-actions button#__ai_save_page_note__::before {
+    content: '📝' !important;
+    font-size: 14px !important;
+  }
+  .ai-panel-actions button#__ai_save_page_note__:disabled::before {
+    content: '' !important;  /* 已保存状态不显示图标 */
   }
   .ai-panel-actions button#__ai_refresh_summary__ {
     background: linear-gradient(135deg, #4285f4, #34a853) !important;
@@ -344,7 +354,11 @@
   
   /* Ask Follow-up button styling */
   .ai-panel-actions button#__ai_ask_followup__ {
-    background: linear-gradient(135deg, #f093fb, #f5576c) !important;
+    background: linear-gradient(135deg, #ea4335, #fbbc04) !important;
+    box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3) !important;
+  }
+  .ai-panel-actions button#__ai_ask_followup__:hover:not(:disabled) {
+    box-shadow: 0 4px 16px rgba(255, 107, 53, 0.4) !important;
   }
   
   /* ===== Chat UI ===== */

@@ -1,6 +1,6 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession, getPageChatTokenUsage } from '../services/aiService'
-import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, getPageChatHistory, setPageChatHistory, clearPageChatHistory, hashText, type ChatMessage } from '../services/storage'
+import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession, getPageChatTokenUsage, abortPageChatGeneration } from '../services/aiService'
+import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, updatePageSummarySaveStatus, getPageChatHistory, setPageChatHistory, clearPageChatHistory, hashText, type ChatMessage } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
 import { marked } from 'marked'
@@ -399,6 +399,7 @@ let currentPageText = ''  // 当前页面文本
 let currentPageSummary = ''  // 当前页面摘要
 let isChatMode = false  // 是否在聊天模式
 let isGeneratingChat = false  // 是否正在生成聊天回复
+let isPageSummarySaved = false  // 当前页面摘要是否已保存
 
 function ensureFloatingButton() {
     if (floatBtnEl) return floatBtnEl
@@ -554,6 +555,11 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       return
     }
     
+    // 如果是强制刷新，重置保存状态
+    if (forceRefresh) {
+      isPageSummarySaved = false
+    }
+    
     ensureSidePanel()
     showSidePanel('Loading...')
     
@@ -567,6 +573,7 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
           // 保存到全局状态（用于 chat）
           currentPageText = cached.text
           currentPageSummary = cached.summary
+          isPageSummarySaved = cached.isSaved || false  // 恢复保存状态
           
           // 尝试加载对话历史（使用哈希值比较，高效！）
           const chatHistory = await getPageChatHistory(currentUrl)
@@ -590,6 +597,7 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       
       // 设置生成标志
       isGeneratingPageSummary = true
+      isPageSummarySaved = false  // 重置保存状态（新摘要）
       
       // 禁用现有按钮（如果有）
       const existingSaveBtn = document.getElementById('__ai_save_page_note__') as HTMLButtonElement | null
@@ -664,12 +672,16 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
 
 function renderPageSummary(summary: string, text: string) {
   // 构建基础 HTML
+  // 根据保存状态决定按钮文本和状态
+  const saveButtonText = isPageSummarySaved ? 'Saved ✓' : 'Save to Notes'
+  const saveButtonDisabled = isPageSummarySaved ? 'disabled' : ''
+  
   let html = `
     <div class="ai-panel-content-wrapper">
       <div class="ai-panel-text">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
     </div>
     <div class="ai-panel-actions">
-      <button id="__ai_save_page_note__">Save to Notes</button>
+      <button id="__ai_save_page_note__" ${saveButtonDisabled}>${saveButtonText}</button>
       <button id="__ai_refresh_summary__">🔄 Refresh</button>
       <button id="__ai_ask_followup__">💬 Ask Follow-up</button>
     </div>
@@ -691,6 +703,9 @@ function renderPageSummary(summary: string, text: string) {
     try {
       await saveNoteToStore('summary', summary, text.slice(0, 300))
       saveBtn.textContent = 'Saved ✓'
+      isPageSummarySaved = true  // 标记为已保存
+      // 更新 storage 中的保存状态
+      await updatePageSummarySaveStatus(location.href, true)
     } catch (e) {
       console.error('[Save error]', e)
       saveBtn.disabled = false
@@ -715,6 +730,7 @@ function renderPageSummary(summary: string, text: string) {
     chatMessages = []
     currentPageText = ''
     currentPageSummary = ''
+    isPageSummarySaved = false  // 重置保存状态
     
     // 清空缓存
     await clearPageSummary(location.href)
@@ -887,8 +903,8 @@ function renderChatUI() {
     // 提交按钮
     submitBtn.addEventListener('click', () => {
       if (isGeneratingChat) {
-        // 停止生成
-        destroyPageChatSession()
+        // 仅停止本次生成，不销毁 session
+        abortPageChatGeneration()
         isGeneratingChat = false
         // 切换按钮与输入框状态（避免整块重渲染导致跳动）
         submitBtn.classList.remove('generating')
@@ -1008,9 +1024,13 @@ async function handleChatSubmit(question: string) {
       }
     })
     
-    // 如果响应为空（被中止），移除临时消息
+    // 如果响应为空（可能是用户停止），仅当完全没有生成内容时移除临时消息
     if (!response || !response.trim()) {
-      chatMessages.pop()
+      const lastMsg = chatMessages[chatMessages.length - 1]
+      const hasContent = lastMsg && lastMsg.role === 'assistant' && lastMsg.content && lastMsg.content.trim().length > 0
+      if (!hasContent) {
+        chatMessages.pop()
+      }
     }
     
     // 更新 token 使用状态显示
@@ -1023,28 +1043,33 @@ async function handleChatSubmit(question: string) {
       contentHash,
       pageSummary: currentPageSummary
     })
-  } catch (e) {
+  } catch (e: any) {
     console.error('[Chat error]', e)
-    // 移除临时的 assistant 消息
-    if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'assistant') {
-      chatMessages.pop()
-    }
-    // 添加错误消息
-    const errorMsg: ChatMessage = {
-      role: 'assistant',
-      content: '⚠️ Failed to get response. Please try again.',
-      timestamp: Date.now()
-    }
-    chatMessages.push(errorMsg)
-    const messagesContainer3 = document.getElementById('__ai_chat_messages__') as HTMLDivElement | null
-    if (messagesContainer3) {
-      const errHtml = `
-        <div class="ai-chat-message-assistant">
-          <div class="ai-chat-message-content">${escapeHtml(errorMsg.content).replace(/\n/g, '<br/>')}</div>
-        </div>
-      `
-      messagesContainer3.insertAdjacentHTML('beforeend', errHtml)
-      messagesContainer3.scrollTop = messagesContainer3.scrollHeight
+    // 如果是用户停止（Abort）且已有部分内容，保留内容不显示错误
+    const isAbort = e?.name === 'AbortError' || e?.message?.includes('aborted') || e?.message?.includes('Session destroyed')
+    const lastMsg = chatMessages[chatMessages.length - 1]
+    const hasContent = lastMsg && lastMsg.role === 'assistant' && lastMsg.content && lastMsg.content.trim().length > 0
+    if (!(isAbort && hasContent)) {
+      // 真错误或没有任何生成内容：显示错误
+      if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'assistant') {
+        chatMessages.pop()
+      }
+      const errorMsg: ChatMessage = {
+        role: 'assistant',
+        content: '⚠️ Failed to get response. Please try again.',
+        timestamp: Date.now()
+      }
+      chatMessages.push(errorMsg)
+      const messagesContainer3 = document.getElementById('__ai_chat_messages__') as HTMLDivElement | null
+      if (messagesContainer3) {
+        const errHtml = `
+          <div class="ai-chat-message-assistant">
+            <div class="ai-chat-message-content">${escapeHtml(errorMsg.content).replace(/\n/g, '<br/>')}</div>
+          </div>
+        `
+        messagesContainer3.insertAdjacentHTML('beforeend', errHtml)
+        messagesContainer3.scrollTop = messagesContainer3.scrollHeight
+      }
     }
   } finally {
     isGeneratingChat = false
