@@ -359,6 +359,44 @@
     overflow: hidden !important;
   }
   
+  /* Token usage status */
+  .ai-chat-token-status {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    padding: 6px 12px !important;
+    font-size: 11px !important;
+    background: #fff !important;
+    border-bottom: 1px solid #e8eaed !important;
+    font-family: system-ui, -apple-system, sans-serif !important;
+  }
+  
+  .ai-chat-token-label {
+    color: #5f6368 !important;
+    margin-right: 6px !important;
+  }
+  
+  .ai-chat-token-value {
+    font-weight: 600 !important;
+    padding: 2px 8px !important;
+    border-radius: 10px !important;
+  }
+  
+  .ai-chat-token-status.low .ai-chat-token-value {
+    color: #188038 !important;
+    background: #e6f4ea !important;
+  }
+  
+  .ai-chat-token-status.medium .ai-chat-token-value {
+    color: #e37400 !important;
+    background: #fef7e0 !important;
+  }
+  
+  .ai-chat-token-status.high .ai-chat-token-value {
+    color: #c5221f !important;
+    background: #fce8e6 !important;
+  }
+  
   .ai-chat-messages {
     flex: 1 !important;
     overflow-y: auto !important;

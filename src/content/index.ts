@@ -1,5 +1,5 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
-import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession } from '../services/aiService'
+import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession, getPageChatTokenUsage } from '../services/aiService'
 import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, getPageChatHistory, setPageChatHistory, clearPageChatHistory, hashText, type ChatMessage } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
@@ -429,7 +429,7 @@ function ensureFloatingButton() {
     // Tooltip 提示（悬停时显示）
     const tooltip = document.createElement('div')
     tooltip.className = 'ai-float-tooltip'
-    tooltip.innerHTML = 'Click to summarize the page & Ask any follow-up questions!'
+    tooltip.innerHTML = 'Click to summarize the page & ask any follow-up questions!'
     el.appendChild(tooltip)
   
     // Hover 显示/隐藏 tooltip
@@ -749,12 +749,58 @@ function renderPageSummary(summary: string, text: string) {
       
       // 重新渲染整个面板以显示聊天界面
       renderPageSummary(currentPageSummary, currentPageText)
+      
+      // 确保 token 状态在下一帧更新（等待 DOM 渲染完成）
+      setTimeout(() => updateTokenStatus(), 0)
     }
   })
   
   // 如果已经在聊天模式或有历史，渲染聊天UI
   if (chatMessages.length > 0 || isChatMode) {
     renderChatUI()
+    
+    // 如果有 chat history 但还没有 session，自动创建 session（以便显示 token usage）
+    if (chatMessages.length > 0 && !hasPageChatSession()) {
+      // 异步创建 session，不阻塞 UI 渲染
+      ;(async () => {
+        const targetLang = (await getSetting<string>('targetLang')) || 'en'
+        console.log('[Content] Auto-creating chat session for restored history')
+        const success = await createPageChatSession({
+          pageText: currentPageText,
+          pageSummary: currentPageSummary,
+          lang: targetLang,
+          chatHistory: chatMessages
+        })
+        
+        if (success) {
+          // Session 创建成功后，重新渲染 chat UI 以显示 token status
+          console.log('[Content] Session created, re-rendering chat UI to show token status')
+          renderChatUI()
+        }
+      })()
+    }
+  }
+}
+
+// 更新 token 使用状态显示
+function updateTokenStatus() {
+  const tokenStatus = document.querySelector('.ai-chat-token-status')
+  if (!tokenStatus) return
+  
+  const tokenUsage = getPageChatTokenUsage()
+  if (!tokenUsage) {
+    tokenStatus.remove()
+    return
+  }
+  
+  // 更新百分比和颜色
+  const colorClass = tokenUsage.percentage < 50 ? 'low' : tokenUsage.percentage < 80 ? 'medium' : 'high'
+  tokenStatus.className = `ai-chat-token-status ${colorClass}`
+  tokenStatus.setAttribute('title', `Context window usage: ${tokenUsage.usage} / ${tokenUsage.quota} tokens`)
+  
+  const valueEl = tokenStatus.querySelector('.ai-chat-token-value')
+  if (valueEl) {
+    valueEl.textContent = `${tokenUsage.percentage}%`
   }
 }
 
@@ -782,8 +828,22 @@ function renderChatUI() {
     messagesHTML += '</div>'
   }
   
+  // 获取 token 使用情况
+  const tokenUsage = getPageChatTokenUsage()
+  let tokenStatusHTML = ''
+  if (tokenUsage) {
+    const colorClass = tokenUsage.percentage < 50 ? 'low' : tokenUsage.percentage < 80 ? 'medium' : 'high'
+    tokenStatusHTML = `
+      <div class="ai-chat-token-status ${colorClass}" title="Context window usage: ${tokenUsage.usage} / ${tokenUsage.quota} tokens">
+        <span class="ai-chat-token-label">Context:</span>
+        <span class="ai-chat-token-value">${tokenUsage.percentage}%</span>
+      </div>
+    `
+  }
+  
   // 输入区域
   const inputHTML = `
+    ${tokenStatusHTML}
     <div class="ai-chat-input-container">
       <textarea 
         id="__ai_chat_input__" 
@@ -952,6 +1012,9 @@ async function handleChatSubmit(question: string) {
     if (!response || !response.trim()) {
       chatMessages.pop()
     }
+    
+    // 更新 token 使用状态显示
+    updateTokenStatus()
     
     // 保存对话历史（使用哈希值标识页面内容）
     const contentHash = await hashText(currentPageText)

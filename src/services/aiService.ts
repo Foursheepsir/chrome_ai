@@ -1098,6 +1098,15 @@ Guidelines:
     }
     
     console.log('[AI] ✅ Page chat session created successfully')
+    
+    // 检查 token 使用情况
+    if (currentPageChatSession) {
+      const usage = currentPageChatSession.inputUsage || 0
+      const quota = currentPageChatSession.inputQuota || 0
+      const percentage = quota > 0 ? Math.round((usage / quota) * 100) : 0
+      console.log(`[AI] Token usage: ${usage}/${quota} (${percentage}%)`)
+    }
+    
     return true
   } catch (e: any) {
     console.error('[AI] Failed to create page chat session:', e)
@@ -1147,6 +1156,14 @@ export async function askPageQuestion(question: string, opts: { lang?: string; o
       
       console.log('[AI] ✅ Response completed')
       console.log('[AI] Result length:', result.length)
+      
+      // 检查 token 使用情况
+      if (currentPageChatSession) {
+        const usage = currentPageChatSession.inputUsage || 0
+        const quota = currentPageChatSession.inputQuota || 0
+        const percentage = quota > 0 ? Math.round((usage / quota) * 100) : 0
+        console.log(`[AI] Token usage after response: ${usage}/${quota} (${percentage}%)`)
+      }
       
       return result
     } catch (streamError) {
@@ -1211,6 +1228,17 @@ export function destroyPageChatSession() {
 // 检查 page chat session 是否存在
 export function hasPageChatSession(): boolean {
   return currentPageChatSession !== null
+}
+
+// 获取当前 page chat session 的 token 使用情况
+export function getPageChatTokenUsage(): { usage: number; quota: number; percentage: number } | null {
+  if (!currentPageChatSession) {
+    return null
+  }
+  const usage = currentPageChatSession.inputUsage || 0
+  const quota = currentPageChatSession.inputQuota || 0
+  const percentage = quota > 0 ? Math.round((usage / quota) * 100) : 0
+  return { usage, quota, percentage }
 }
 
 // 清理资源
