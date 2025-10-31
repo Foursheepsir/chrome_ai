@@ -5,7 +5,7 @@
   background: #ffffff;
   display: flex;
   flex-direction: column;
-  font-family: 'Google Sans', system-ui, -apple-system, sans-serif;
+  font-family: 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   border-radius: 0 0 12px 12px;
   overflow: hidden;
 }
@@ -17,10 +17,154 @@ html, body {
   display: block !important;
 }
 
+/* Welcome Banner */
+.welcome-banner {
+  position: relative;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 16px 20px;
+  color: white;
+  border-radius: 0;
+}
+
+.close-banner-btn {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: #ff4444;
+  border: 1px solid #ff6161;
+  color: #fff;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  transition: all 0.2s ease;
+  padding: 0;
+  font-weight: 400;
+}
+
+.close-banner-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  color: #ff2222;
+  transform: scale(1.1);
+}
+
+.close-banner-btn:active {
+  transform: scale(0.95);
+}
+
+.welcome-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-right: 24px;
+}
+
+.welcome-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.welcome-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.welcome-description {
+  margin: 0 0 10px 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 400;
+}
+
+.welcome-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.learn-more-link {
+  color: rgba(255, 255, 255, 0.95);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.learn-more-link:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.gemini-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  white-space: nowrap;
+}
+
+/* Show Welcome Hint */
+.show-welcome-hint {
+  padding: 8px 20px;
+  background: linear-gradient(135deg, #b4aef7 0%, #d0b3e0 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.show-welcome-btn {
+  background: rgba(255, 255, 255, 0.95);
+  color: #667eea;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.show-welcome-btn:hover {
+  background: white;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.show-welcome-btn:active {
+  transform: translateY(0);
+}
+
 .popup-root h3 {
   margin: 0;
   padding: 12px 20px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #4285f4, #34a853);
   color: white;
   font-size: 16px;
   font-weight: 500;
@@ -182,22 +326,22 @@ html, body {
   flex: 1;
 }
 
-.popup-root button:first-of-type {
+.popup-root > .row button:first-of-type {
   background: linear-gradient(135deg, #4285f4, #34a853);
   color: white;
 }
 
-.popup-root button:first-of-type:hover {
+.popup-root > .row button:first-of-type:hover {
   box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3);
   transform: translateY(-1px);
 }
 
-.popup-root button:last-of-type {
+.popup-root > .row button:last-of-type {
   background: linear-gradient(135deg, #ea4335, #fbbc04);
   color: white;
 }
 
-.popup-root button:last-of-type:hover {
+.popup-root > .row button:last-of-type:hover {
   box-shadow: 0 2px 8px rgba(234, 67, 53, 0.3);
   transform: translateY(-1px);
 }

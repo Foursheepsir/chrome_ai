@@ -7,11 +7,14 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([])
   const [q, setQ] = useState('')
   const [lang, setLang] = useState('zh')
+  const [showWelcome, setShowWelcome] = useState<boolean | null>(null)
 
   // 初始化：加载笔记 & 读取语言；并通知当前页显示悬浮球
   useEffect(() => {
     (async () => {
       setNotes(await listNotes())
+      
+      // 读取语言设置
       const saved = await getSetting<string>('targetLang')
       if (saved) {
         setLang(saved)
@@ -22,6 +25,17 @@ export default function App() {
         await setSetting('targetLang', defaultLang)
         setLang(defaultLang)
         console.log('[Popup] No saved language, using default:', defaultLang)
+      }
+      
+      // 读取 welcome banner 显示状态
+      const welcomeVisible = await getSetting<boolean>('showWelcomeBanner')
+      if (welcomeVisible !== undefined) {
+        setShowWelcome(welcomeVisible)
+        console.log('[Popup] Loaded welcome banner state:', welcomeVisible)
+      } else {
+        // 默认显示
+        await setSetting('showWelcomeBanner', true)
+        setShowWelcome(true)
       }
     })()
 
@@ -60,6 +74,12 @@ export default function App() {
     [notes, q]
   )
 
+  const toggleWelcome = async (show: boolean) => {
+    setShowWelcome(show)
+    await setSetting('showWelcomeBanner', show)
+    console.log('[Popup] Welcome banner state changed to:', show)
+  }
+
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -96,6 +116,47 @@ export default function App() {
 
   return (
     <div className="popup-root">
+      {/* Welcome Banner */}
+      {showWelcome === null ? null : showWelcome ? (
+        <div className="welcome-banner">
+          <button 
+            className="close-banner-btn"
+            onClick={() => toggleWelcome(false)}
+            aria-label="Close welcome banner"
+          >
+            ✕
+          </button>
+          <div className="welcome-header">
+            <span className="welcome-icon">✨</span>
+            <span className="welcome-title">Welcome to your AI Companion!</span>
+          </div>
+          <p className="welcome-description">
+            Your intelligent assistant for web content. Summarize pages, explain terms, 
+            translate text, ask follow-up questions, and save insights any time you want—all powered by Chrome's on-device AI.
+          </p>
+          <div className="welcome-footer">
+            <a 
+              href="https://developer.chrome.com/docs/ai/built-in" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="learn-more-link"
+            >
+              Learn more →
+            </a>
+            <span className="gemini-badge">⚡ Powered by Gemini Nano</span>
+          </div>
+        </div>
+      ) : (
+        <div className="show-welcome-hint">
+          <button 
+            className="show-welcome-btn"
+            onClick={() => toggleWelcome(true)}
+          >
+            ✨ Show Welcome
+          </button>
+        </div>
+      )}
+
       <h3>AI Notes</h3>
 
       <div className="row">

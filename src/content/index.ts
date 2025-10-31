@@ -409,6 +409,22 @@ function ensureFloatingButton() {
       await setSetting('floatHidden', true)
     })
   
+    // Tooltip 提示（悬停时显示）
+    const tooltip = document.createElement('div')
+    tooltip.className = 'ai-float-tooltip'
+    tooltip.innerHTML = 'Click to summarize the page & Ask any follow-up questions!'
+    el.appendChild(tooltip)
+  
+    // Hover 显示/隐藏 tooltip
+    el.addEventListener('mouseenter', () => {
+      if (!dragging) {
+        tooltip.classList.add('visible')
+      }
+    })
+    el.addEventListener('mouseleave', () => {
+      tooltip.classList.remove('visible')
+    })
+  
     document.documentElement.appendChild(el)
   
     // 读取上次位置 / 是否隐藏
@@ -435,6 +451,7 @@ function ensureFloatingButton() {
   
     const onPointerDown = (clientX: number, clientY: number) => {
       dragging = true; moved = false; el.classList.add('dragging')
+      tooltip.classList.remove('visible')  // 拖动时隐藏 tooltip
       const rect = el.getBoundingClientRect()
       startLeft = rect.left; startTop = rect.top
       startX = clientX; startY = clientY

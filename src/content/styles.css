@@ -1,5 +1,5 @@
 /* 选区工具条 */
-.ai-tip {
+  .ai-tip {
     position: absolute;
     z-index: 2147483647;
     display: none;
@@ -9,7 +9,7 @@
     padding: 6px;
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,.12);
-    font: 14px/1.4 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font: 14px/1.4 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
     backdrop-filter: blur(8px);
   }
   .ai-tip button[data-act="summ"] {
@@ -59,7 +59,7 @@
   border-radius: 12px;
   padding: 16px 18px;
   box-shadow: 0 4px 20px rgba(0,0,0,.15);
-  font: 15px/1.6 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font: 15px/1.6 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   color: #202124;
   word-break: break-word;
 }
@@ -166,6 +166,47 @@
     transform: scale(1);
   }
   
+  /* Tooltip 提示 */
+  .ai-float-tooltip {
+    position: absolute;
+    left: 72px; /* 悬浮球宽度 64px + 8px 间距 */
+    top: 0;
+    white-space: nowrap;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-10px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 2147483648;
+  }
+  
+  /* Tooltip 箭头 */
+  .ai-float-tooltip::before {
+    content: '';
+    position: absolute;
+    left: -8px;
+    top: 12px;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 6px 8px 6px 0;
+    border-color: transparent #667eea transparent transparent;
+  }
+  
+  /* 悬停时显示 tooltip */
+  .ai-float-tooltip.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+  }
 
   /* 侧边栏 */
   .ai-sidepanel {
@@ -180,7 +221,7 @@
     display: grid;
     grid-template-rows: 52px 1fr;
     transition: right .3s cubic-bezier(0.4, 0, 0.2, 1);
-    font: 14px/1.5 'Google Sans', system-ui, -apple-system, sans-serif;
+    font: 14px/1.5 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
     color: #202124;
   }
   .ai-sidepanel.open { right: 0; }
@@ -251,7 +292,7 @@
   color: #202124 !important;
   line-height: 1.7 !important;
   font-size: 16px !important;
-  font-family: 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
+  font-family: 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
   word-wrap: break-word;
 }
   
@@ -275,7 +316,7 @@
     cursor: pointer !important;
     font-size: 13px !important;
     font-weight: 500 !important;
-    font-family: 'Google Sans', system-ui, -apple-system, sans-serif !important;
+    font-family: 'SF Pro Display', 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
     transition: all 0.2s ease !important;
     white-space: nowrap !important;
     flex-shrink: 0 !important;
