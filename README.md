@@ -1,5 +1,13 @@
 # Chrome AI Companion
 
+<p align="center">
+  <img src="public/icon128.png" alt="Chrome AI Companion" width="96" height="96" />
+</p>
+<p align="center">
+  <b>Private, on‑device AI for the Web</b><br/>
+  Summarize • Explain • Translate • Chat — all locally with Chrome Built‑in AI.
+</p>
+
 Instructions to install, run and evaluate this Chrome Extension from a clean environment.
 
 This project demonstrates on-device AI features using Chrome's built-in AI APIs (Gemini Nano), including:
@@ -15,10 +23,14 @@ All AI runs locally on device — no network calls to external AI services.
 
 ## 1) What this app does
 
-- Summarize selected text or the full page in multiple styles (tldr, key points, teaser, headline).
-- Explain short phrases/terms with context awareness.
-- Translate with auto language detection to a target language.
-- Page Chat: multi-turn Q&A about current page content, with token usage indicators.
+<div align="center" style="margin-bottom: 8px;">
+  <span style="font-size: 28px;">✨ 🧠 🌐 💬</span>
+</div>
+
+- **✨ Summarize anything** — Selected text or the entire page. Pick your style: TL;DR, Key Points, Teaser, or Headline.
+- **🧠 Explain in context** — Highlight tricky terms and get clear, concise explanations grounded in surrounding content.
+- **🌐 Translate effortlessly** — Auto-detects the source language and translates into your preferred language.
+- **💬 Page Chat** — Ask follow‑ups about the page with multi‑turn memory and real‑time token usage indicators.
 
 APIs used: Summarizer API, Translator API, Prompt API (LanguageModel), LanguageDetector. See implementation notes and diagnostics in `AI_SETUP.md`.
 
