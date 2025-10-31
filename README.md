@@ -1,12 +1,10 @@
 # Chrome AI Companion
 
 <p align="center">
-  <img src="public/icon128.png" alt="Chrome AI Companion" width="96" height="96" />
+  <img src="public/icon128.png" alt="STEPS: Your personal Chrome AI Companion" width="96" height="96" />
 </p>
-<p align="center">
-  <b>Private, on‑device AI for the Web</b><br/>
-  Summarize • Explain • Translate • Chat — all locally with Chrome Built‑in AI.
-</p>
+<h2 align="center"><b>Private, on‑device AI build only for you</b></h2>
+<h4 align="center">Summarize • Translate • Explain • Page Chat • Save Notes — all locally with Chrome Built‑in AI.</h4>
 
 Instructions to install, run and evaluate this Chrome Extension from a clean environment.
 
@@ -14,25 +12,22 @@ This project demonstrates on-device AI features using Chrome's built-in AI APIs 
 
 - Summarization (Summarizer API)
 - Translation (Translator API)
-- Explanations and Page Chat (Prompt API / LanguageModel)
+- Explanations and Page Chat (Prompt API)
 - Language detection (LanguageDetector)
 
 All AI runs locally on device — no network calls to external AI services.
 
 ---
 
-## 1) What this app does
+## 1) What this Chrome extension does
 
-<div align="center" style="margin-bottom: 8px;">
-  <span style="font-size: 28px;">✨ 🧠 🌐 💬</span>
-</div>
-
-- **✨ Summarize anything** — Selected text or the entire page. Pick your style: TL;DR, Key Points, Teaser, or Headline.
-- **🧠 Explain in context** — Highlight tricky terms and get clear, concise explanations grounded in surrounding content.
+- **✨ Summarize anything** — Generate concise, high‑quality summaries for selected text or the entire page.
 - **🌐 Translate effortlessly** — Auto-detects the source language and translates into your preferred language.
+- **🧠 Explain in context** — Highlight tricky terms and get clear, concise explanations grounded in surrounding content.
 - **💬 Page Chat** — Ask follow‑ups about the page with multi‑turn memory and real‑time token usage indicators.
+- **📝 Save Notes** — Capture and organize useful snippets, insights, or quotes for later reference.
 
-APIs used: Summarizer API, Translator API, Prompt API (LanguageModel), LanguageDetector. See implementation notes and diagnostics in `AI_SETUP.md`.
+APIs used: Summarizer API, Translator API, Prompt API, LanguageDetector. See implementation notes and diagnostics in `AI_SETUP.md`.
 
 ---
 
@@ -188,8 +183,9 @@ After completing AI setup in [AI_SETUP.md](./AI_SETUP.md):
 1) Text Selection Actions
 - Select text on any webpage
 - A tooltip toolbar appears with: Summarize / Explain / Translate / Save
-- Try "Summarize" in different styles (tldr, key points, teaser, headline)
+- Try "Summarize" to avoid reading long paragraphs
 - Try "Translate" (auto-detect source language)
+- Try "Save" to save whatever you find interesting or useful
 
 2) Full Page Summary
 - Click the floating button (bottom-left)
