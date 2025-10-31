@@ -51,6 +51,8 @@ If you only want to try the extension, you do NOT need Node.js.
 
 4. Start using it on any webpage (see "How to Use and Test" below)
 
+**Note**: The first time you use any AI feature, it may take a while as Chrome downloads the required language models in the background. Thank you for your patience! Subsequent uses will be much faster.
+
 
 ## 3) Build From Source (Optional)
 
