@@ -6,6 +6,16 @@ const SETTINGS_KEY = 'settings'
 const PAGE_SUMMARIES_KEY = 'pageSummaries'
 const PAGE_CHAT_HISTORY_KEY = 'pageChatHistory'
 
+// ------ 哈希工具函数 ------
+// 使用 SHA-256 生成文本的哈希值（高效比较页面内容是否变化）
+export async function hashText(text: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(text)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 // ------ 小工具：Promise 封装 ------
 function getLocal<T = any>(key: string): Promise<T | undefined> {
   return new Promise((resolve) => {
@@ -51,6 +61,7 @@ export async function getSetting<T = any>(key: string): Promise<T | undefined> {
 export type PageSummaryCache = {
   summary: string
   text: string
+  contentHash: string  // 页面内容的哈希值（用于高效比较）
   timestamp: number
 }
 
@@ -61,7 +72,8 @@ export async function getPageSummary(url: string): Promise<PageSummaryCache | un
 
 export async function setPageSummary(url: string, summary: string, text: string) {
   const cache = (await getLocal<Record<string, PageSummaryCache>>(PAGE_SUMMARIES_KEY)) || {}
-  cache[url] = { summary, text, timestamp: Date.now() }
+  const contentHash = await hashText(text)
+  cache[url] = { summary, text, contentHash, timestamp: Date.now() }
   await setLocal({ [PAGE_SUMMARIES_KEY]: cache })
 }
 
@@ -80,7 +92,7 @@ export type ChatMessage = {
 
 export type PageChatHistory = {
   messages: ChatMessage[]
-  pageText: string  // 用于验证页面内容是否变化
+  contentHash: string  // 页面内容的哈希值（用于验证页面内容是否变化）
   pageSummary: string  // 初始的页面摘要
   timestamp: number
 }
@@ -90,7 +102,7 @@ export async function getPageChatHistory(url: string): Promise<PageChatHistory |
   return cache[url]
 }
 
-export async function setPageChatHistory(url: string, history: PageChatHistory) {
+export async function setPageChatHistory(url: string, history: Omit<PageChatHistory, 'timestamp'>) {
   const cache = (await getLocal<Record<string, PageChatHistory>>(PAGE_CHAT_HISTORY_KEY)) || {}
   cache[url] = { ...history, timestamp: Date.now() }
   await setLocal({ [PAGE_CHAT_HISTORY_KEY]: cache })

@@ -1,8 +1,9 @@
 import { getSelectionText, extractReadableText } from '../services/domExtract'
 import { summarize, explain, translate, destroyResources, destroyExplainSession, abortSummarize, abortTranslate, ensureKeepaliveSession, createPageChatSession, askPageQuestion, destroyPageChatSession, hasPageChatSession } from '../services/aiService'
-import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, getPageChatHistory, setPageChatHistory, clearPageChatHistory, type ChatMessage } from '../services/storage'
+import { addNote, getSetting, setSetting, getPageSummary, setPageSummary, clearPageSummary, getPageChatHistory, setPageChatHistory, clearPageChatHistory, hashText, type ChatMessage } from '../services/storage'
 import type { Msg, Note } from '../utils/messaging'
 import { nanoid } from 'nanoid'
+import { marked } from 'marked'
 
 /** ---------------- Tooltip（选区操作条） ---------------- */
 
@@ -217,66 +218,44 @@ function escapeHtml(str: string) {
   return div.innerHTML
 }
 
-// 轻量 markdown 渲染器（支持粗体、斜体、列表、代码、链接）
+// 配置 marked
+marked.setOptions({
+  breaks: true, // 支持 GitHub 风格的换行（单个换行符转为 <br>）
+  gfm: true, // 启用 GitHub Flavored Markdown
+  pedantic: false, // 不使用严格模式，更宽松地解析
+})
+
+// 使用 marked 渲染 markdown（支持纯文本和 markdown 混合）
 function renderMarkdown(text: string): string {
   if (!text) return ''
   
-  // 处理内联 markdown 的函数（粗体、斜体、代码、链接）
-  function processInline(str: string): string {
-    let result = escapeHtml(str)
-    // 链接 [text](url)
-    result = result.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    // 粗体 **text** （先处理粗体，避免和斜体冲突）
-    result = result.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
-    // 行内代码 `code`
-    result = result.replace(/`([^`]+)`/g, '<code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: monospace;">$1</code>')
-    return result
+  try {
+    // 使用 marked 渲染（会自动处理纯文本和 markdown）
+    const html = marked.parse(text, { async: false }) as string
+    
+    // 为生成的 HTML 添加内联样式
+    return html
+      .replace(/<p>/g, '<p style="margin: 8px 0; line-height: 1.6;">')
+      .replace(/<ul>/g, '<ul style="margin: 8px 0; padding-left: 24px;">')
+      .replace(/<ol>/g, '<ol style="margin: 8px 0; padding-left: 24px;">')
+      .replace(/<li>/g, '<li style="margin: 4px 0;">')
+      .replace(/<h1>/g, '<h1 style="font-size: 1.8em; font-weight: bold; margin: 12px 0 8px 0;">')
+      .replace(/<h2>/g, '<h2 style="font-size: 1.5em; font-weight: bold; margin: 12px 0 8px 0;">')
+      .replace(/<h3>/g, '<h3 style="font-size: 1.3em; font-weight: bold; margin: 12px 0 8px 0;">')
+      .replace(/<h4>/g, '<h4 style="font-size: 1.1em; font-weight: bold; margin: 10px 0 6px 0;">')
+      .replace(/<h5>/g, '<h5 style="font-size: 1em; font-weight: bold; margin: 10px 0 6px 0;">')
+      .replace(/<h6>/g, '<h6 style="font-size: 0.9em; font-weight: bold; margin: 10px 0 6px 0;">')
+      .replace(/<code>/g, '<code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">')
+      .replace(/<pre>/g, '<pre style="background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 12px 0;">')
+      .replace(/<blockquote>/g, '<blockquote style="border-left: 4px solid #ddd; padding-left: 16px; margin: 12px 0; color: #666;">')
+      .replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" style="color: #1a73e8; text-decoration: none;" ')
+      .replace(/<strong>/g, '<strong style="font-weight: 600;">')
+      .replace(/<em>/g, '<em style="font-style: italic;">')
+  } catch (e) {
+    console.error('[Markdown render error]', e)
+    // 降级：返回转义的纯文本，保留换行
+    return '<p style="margin: 8px 0; line-height: 1.6;">' + escapeHtml(text).replace(/\n/g, '<br/>') + '</p>'
   }
-  
-  const lines = text.trim().split('\n')
-  const result: string[] = []
-  let inList = false
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const trimmed = line.trim()
-    
-    // 空行
-    if (!trimmed) {
-      if (inList) {
-        result.push('</ul>')
-        inList = false
-      }
-      continue
-    }
-    
-    // 列表项：支持 * 或 - 后面跟1个或多个空格
-    const listMatch = trimmed.match(/^[-*]\s+(.*)$/)
-    if (listMatch) {
-      if (!inList) {
-        result.push('<ul style="margin: 8px 0; padding-left: 24px; list-style-type: disc;">')
-        inList = true
-      }
-      result.push(`<li style="margin: 4px 0;">${processInline(listMatch[1])}</li>`)
-      continue
-    }
-    
-    // 非列表项
-    if (inList) {
-      result.push('</ul>')
-      inList = false
-    }
-    
-    // 普通段落
-    result.push(`<p style="margin: 8px 0;">${processInline(trimmed)}</p>`)
-  }
-  
-  // 关闭未闭合的列表
-  if (inList) {
-    result.push('</ul>')
-  }
-  
-  return result.join('')
 }
 
 /** ---------------- 选区按钮行为 ---------------- */
@@ -585,6 +564,24 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       if (!forceRefresh) {
         const cached = await getPageSummary(currentUrl)
         if (cached) {
+          // 保存到全局状态（用于 chat）
+          currentPageText = cached.text
+          currentPageSummary = cached.summary
+          
+          // 尝试加载对话历史（使用哈希值比较，高效！）
+          const chatHistory = await getPageChatHistory(currentUrl)
+          if (chatHistory && chatHistory.contentHash === cached.contentHash) {
+            // 页面内容没变，恢复对话历史
+            console.log('[Content] ✅ Page unchanged after refresh/reload, restoring chat history')
+            console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
+            chatMessages = chatHistory.messages
+          } else {
+            // 页面内容变了或没有历史，清空
+            console.log('[Content] ❌ Page content changed or no history, clearing chat')
+            chatMessages = []
+            await clearPageChatHistory(currentUrl)
+          }
+          
           // 显示缓存的结果
           renderPageSummary(cached.summary, cached.text)
           return
@@ -637,14 +634,19 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
       currentPageText = text
       currentPageSummary = res
       
-      // 尝试加载对话历史
+      // 计算当前页面内容的哈希值
+      const currentHash = await hashText(text)
+      
+      // 尝试加载对话历史（使用哈希值比较，高效！）
       const chatHistory = await getPageChatHistory(currentUrl)
-      if (chatHistory && chatHistory.pageText === text) {
+      if (chatHistory && chatHistory.contentHash === currentHash) {
         // 页面内容没变，恢复对话历史
-        console.log('[AI] Restoring chat history:', chatHistory.messages.length, 'messages')
+        console.log('[Content] ✅ Page content matches, restoring chat history')
+        console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
         chatMessages = chatHistory.messages
       } else {
         // 页面内容变了或没有历史，清空
+        console.log('[Content] ❌ Page content changed or no history, clearing chat')
         chatMessages = []
         await clearPageChatHistory(currentUrl)
       }
@@ -729,12 +731,14 @@ function renderPageSummary(summary: string, text: string) {
       // 第一次点击，进入聊天模式
       isChatMode = true
       
-      // 创建 chat session
+      // 创建 chat session（包含恢复的聊天历史）
       const targetLang = (await getSetting<string>('targetLang')) || 'en'
+      console.log('[Content] Creating chat session with', chatMessages.length, 'restored messages')
       const success = await createPageChatSession({
         pageText: currentPageText,
         pageSummary: currentPageSummary,
-        lang: targetLang
+        lang: targetLang,
+        chatHistory: chatMessages.length > 0 ? chatMessages : undefined
       })
       
       if (!success) {
@@ -878,13 +882,20 @@ async function handleChatSubmit(question: string) {
   }
   
   try {
-    // 确保 session 存在
+    // 确保 session 存在（包含当前的聊天历史作为上下文）
     if (!hasPageChatSession()) {
       const targetLang = (await getSetting<string>('targetLang')) || 'en'
+      // 注意：此时 userMessage 已经添加到 chatMessages，所以要排除最后一条
+      const historyForSession = chatMessages.slice(0, -1)
+      console.log('[Content] Session destroyed, recreating with', historyForSession.length, 'history messages')
+      if (historyForSession.length > 0) {
+        console.log('[Content] Passing history to new session')
+      }
       const success = await createPageChatSession({
         pageText: currentPageText,
         pageSummary: currentPageSummary,
-        lang: targetLang
+        lang: targetLang,
+        chatHistory: historyForSession.length > 0 ? historyForSession : undefined
       })
       
       if (!success) {
@@ -942,12 +953,12 @@ async function handleChatSubmit(question: string) {
       chatMessages.pop()
     }
     
-    // 保存对话历史
+    // 保存对话历史（使用哈希值标识页面内容）
+    const contentHash = await hashText(currentPageText)
     await setPageChatHistory(location.href, {
       messages: chatMessages,
-      pageText: currentPageText,
-      pageSummary: currentPageSummary,
-      timestamp: Date.now()
+      contentHash,
+      pageSummary: currentPageSummary
     })
   } catch (e) {
     console.error('[Chat error]', e)
