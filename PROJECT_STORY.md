@@ -460,6 +460,17 @@ interface PageChatHistory {
    - Users immediately understand what it does
    - Acronyms that guide usage are powerful
 
+4. **Think and Test as a Real User**
+   - We built this as a **production-ready product**, not just a demo
+   - Considered countless edge cases real users would encounter:
+     - What if they refresh mid-generation?
+     - What if they click outside by mistake?
+     - What if they open the same page in 5 tabs?
+     - What if the page content changes after generating summary?
+   - A polished demo might work for 80% of cases
+   - A real product must handle the other 20% gracefully
+   - **This difference defines user trust**
+
 ### Research Insights
 
 **On Information Entropy**
@@ -534,7 +545,7 @@ This project wouldn't exist without:
 
 ## 📧 Get Involved
 
-Found a bug? Have a feature request? Want to contribute?
+Found a bug? Have a feature request? Anything to ask?
 
 **Contact:** danieldd@umich.edu  
 **Repository:** [github.com/Foursheepsir/chrome_ai](https://github.com/Foursheepsir/chrome_ai)
