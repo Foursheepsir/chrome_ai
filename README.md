@@ -3,9 +3,9 @@
 <p align="center">
   <img src="public/icon128.png" alt="STEPS: Your personal Chrome AI Companion" width="96" height="96" />
 </p>
-<h3 align="center"><b>Private, on‑device AI build only for you</b></h3>
+<h3 align="center"><b>Private, on‑device AI only for you</b></h3>
 <h4 align="center">Summarize • Translate • Explain • Page Chat • Save Notes</h4>
-<h4 align="center">— all locally with Chrome Built‑in AI.</h4>
+<h4 align="center">— all locally with Chrome Built‑in AI -</h4>
 
 
 Instructions to install, run and evaluate this Chrome Extension from a clean environment.
@@ -17,7 +17,7 @@ This project demonstrates on-device AI features using Chrome's built-in AI APIs 
 - Explanations and Page Chat (Prompt API)
 - Language detection (LanguageDetector)
 
-All AI runs locally on device — no network calls to external AI services.
+All AI runs locally on device — no network calls to external AI services, no fees at all!
 
 ---
 
@@ -262,4 +262,11 @@ npm run lint    # run ESLint
 
 ---
 
-If anything fails during setup or testing, please start with [AI_SETUP.md](./AI_SETUP.md) — it includes exact console commands, availability checks, and common fixes.
+## 13) Contact & Support
+
+If you encounter any issues, have questions, or want to request features, feel free to reach out:
+
+📧 **Email**: [danieldd@umich.edu](mailto:danieldd@umich.edu)
+
+For setup and troubleshooting, please start with [AI_SETUP.md](./AI_SETUP.md) — it includes exact console commands, availability checks, and common fixes.
+
