@@ -434,7 +434,7 @@ interface PageChatHistory {
 
 3. **Streaming Changes Everything**
    - Users perceive streaming responses as 2x faster
-   - But you must throttle updates (50ms intervals)
+   - Allow immediate interruption if wrongly click
    - Always show progress indicators
 
 4. **Context Windows Are Precious**
@@ -475,7 +475,7 @@ $$
 R_{\text{comprehension}} = \frac{Q \cdot T}{C}
 $$
 
-As \( C \uparrow \) and \( Q \downarrow \), \( R_{\text{comprehension}} \downarrow \) rapidly.
+As $C \uparrow$ and $Q \downarrow$, $R_{\text{comprehension}} \downarrow$ rapidly.
 
 **STEPS addresses this by:**
 - Reducing \( C \) via summarization (compress information)
@@ -504,11 +504,20 @@ As \( C \uparrow \) and \( Q \downarrow \), \( R_{\text{comprehension}} \downarr
    - Markdown export
    - Sync across devices (optional, privacy-preserving)
 
-3. **Custom Prompts**
+3. **Writer API Integration: From Notes to Reports**
+   - Use Chrome's Writer API to synthesize saved notes into cohesive reports
+   - Example workflow:
+     - Collect notes from multiple research papers
+     - Click "Generate Report" in popup
+     - AI weaves notes into a structured document
+   - Perfect for students writing literature reviews or professionals compiling research
+   - All processing still happens on-device
+
+4. **Custom Prompts**
    - Let users define their own AI personas
    - "Explain like I'm 5" vs "Academic mode"
 
-4. **Offline Mode Indicator**
+5. **Offline Mode Indicator**
    - Visual badge showing when AI is fully offline
    - Reassure users about privacy
 
