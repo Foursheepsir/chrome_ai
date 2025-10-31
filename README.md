@@ -24,12 +24,14 @@ All AI runs locally on device — no network calls to external AI services, no f
 ## 1) What this Chrome extension does
 
 - **✨ Summarize anything** — Generate concise, high‑quality summaries for selected text or the entire page.
-- **🌐 Translate effortlessly** — Auto-detects the source language and translates into your preferred language.
+- **🌐 Translate effortlessly** — Auto-detects the source language and translates into your preferred target language.
 - **🧠 Explain in context** — Highlight tricky terms and get clear, concise explanations grounded in surrounding content.
-- **💬 Page Chat** — Ask follow‑ups about the page with multi‑turn memory and real‑time token usage indicators.
-- **📝 Save Notes** — Capture and organize useful snippets, insights, or quotes for later reference.
+- **💬 Page Chat** — Ask any follow‑ups about the page with multi‑turn memory and real‑time token usage indicators.
+- **📝 Save Notes** — Capture and organize useful snippets, insights, or quotes from any AI-generated content (summaries, explanations, translations, chat responses) or raw content. See all your notes in Popup Control Panel.
 
 APIs used: Summarizer API, Translator API, Prompt API, LanguageDetector. See implementation notes and diagnostics in `AI_SETUP.md`.
+
+📖 **More details can be found in [How to Use and Test](#8-how-to-use-and-test)**
 
 ---
 
@@ -191,30 +193,42 @@ Reload the extension in `chrome://extensions` when using watch builds. The dev s
 
 After completing AI setup in [AI_SETUP.md](./AI_SETUP.md):
 
-1) Text Selection Actions
-- Select text on any webpage
-- A tooltip toolbar appears with: Summarize / Explain / Translate / Save
-- Try "Summarize" to avoid reading long paragraphs
-- Try "Translate" (auto-detect source language)
-- Try "Save" to save whatever you find interesting or useful
+1) **Text Selection Actions**
+   - Select text on any webpage
+   - A tooltip toolbar appears with: Summarize / Explain / Translate / Save
+   - Try "Summarize" to avoid reading long paragraphs
+   - Try "Translate" (auto-detect source language)
+   - Try "Save" to save whatever you find interesting or useful
 
-2) Full Page Summary
-- Click the floating button (bottom-left)
-- Verify an AI-generated page summary in the side panel
+2) **Full Page Summary**
+   - Click the floating button (bottom-left)
+   - Verify an AI-generated page summary in the side panel
+   - Click "Save to Notes" button in the summary panel to save it to your notes
 
-3) Explain Feature
-- Select a short phrase/term (1–4 words)
-- Click "Explain"
-- Check that output reflects page context
+3) **Explain Feature**
+   - Select a short phrase/term (1–4 words)
+   - Click "Explain"
+   - Check that output reflects page context
+   - Save the explanation to notes if useful
 
-4) Page Chat
-- After generating a summary, click "Ask Follow-up"
-- Ask multi-turn questions about the page
-- Observe token usage indicators and retained context
+4) **Page Chat**
+   - After generating a summary, click "Ask Follow-up"
+   - Ask multi-turn questions about the page
+   - Observe token usage indicators and retained context
+   - Save helpful chat responses to notes
 
-5) Diagnostics & Logs
-- Open DevTools Console on the page
-- Look for `[AI] ...` logs indicating API availability, downloads, caching, and fallbacks
+5) **Popup Control Panel** (click the extension icon in toolbar)
+   - **View Notes**: Browse all saved notes with timestamps and sources
+   - **Search Notes**: Use the search bar to filter notes by keywords
+   - **Language Settings**: Select your preferred output language (English, Japanese, Spanish, etc.)
+     - This controls the output language for **Summarize**, **Explain**, and the **target language for Translate**
+     - Changes apply immediately to all subsequent AI operations
+   - **Export Notes**: Click "Export as JSON" to download all notes as a JSON file
+   - **Clear All**: Remove all saved notes with one click (with confirmation)
+
+6) **Diagnostics & Logs**
+   - Open DevTools Console on the page
+   - Look for `[AI] ...` logs indicating API availability, downloads, caching, and fallbacks
 
 Expected behavior:
 - If built-in APIs are available, logs include “Using Chrome AI ...” and model instances are created and cached
