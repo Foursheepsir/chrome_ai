@@ -611,9 +611,15 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
             console.log('[Content] ✅ Page unchanged after refresh/reload, restoring chat history')
             console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
             chatMessages = chatHistory.messages
+            
+            if (chatMessages.length > 0) {
+              isChatMode = true
+              console.log('[Content] Setting isChatMode = true (chat history exists)')
+            }
           } else {
             console.log('[Content] ❌ Page content changed or no history, clearing chat')
             chatMessages = []
+            isChatMode = false
             await clearPageChatHistory(currentUrl)
           }
           
@@ -668,9 +674,15 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
         console.log('[Content] ✅ Page content matches, restoring chat history')
         console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
         chatMessages = chatHistory.messages
+        // 如果有聊天历史，设置为聊天模式
+        if (chatMessages.length > 0) {
+          isChatMode = true
+          console.log('[Content] Setting isChatMode = true (chat history exists)')
+        }
       } else {
         console.log('[Content] ❌ Page content changed or no history, clearing chat')
         chatMessages = []
+        isChatMode = false
         await clearPageChatHistory(currentUrl)
       }
       
@@ -687,6 +699,10 @@ function renderPageSummary(summary: string, text: string) {
   const saveButtonText = isPageSummarySaved ? 'Saved ✓' : 'Save to Notes'
   const saveButtonDisabled = isPageSummarySaved ? 'disabled' : ''
   
+  // Determine Ask Follow-up button state
+  const followupButtonText = isChatMode ? '🗑️ Clear Session' : '💬 Ask Follow-up'
+  const followupButtonClass = isChatMode ? 'clear-mode' : ''
+  
   let html = `
     <div class="ai-panel-content-wrapper">
       <div class="ai-panel-text">${escapeHtml(summary).replace(/\n/g, '<br/>')}</div>
@@ -694,7 +710,7 @@ function renderPageSummary(summary: string, text: string) {
     <div class="ai-panel-actions">
       <button id="__ai_save_page_note__" ${saveButtonDisabled}>${saveButtonText}</button>
       <button id="__ai_refresh_summary__">🔄 Refresh</button>
-      <button id="__ai_ask_followup__">💬 Ask Follow-up</button>
+      <button id="__ai_ask_followup__" class="${followupButtonClass}">${followupButtonText}</button>
     </div>
   `
   
@@ -744,10 +760,33 @@ function renderPageSummary(summary: string, text: string) {
     await openPanelAndSummarizePage(true)
   })
   
-  // Ask Follow-up button
+  // Ask Follow-up / Clear Session button
   const askBtn = document.getElementById('__ai_ask_followup__') as HTMLButtonElement | null
   askBtn?.addEventListener('click', async () => {
-    if (!isChatMode) {
+    if (isChatMode) {
+      // Clear session mode - destroy everything and reset
+      console.log('[Content] Clearing chat session...')
+      
+      // Stop any ongoing generation
+      if (isGeneratingChat) {
+        abortPageChatGeneration()
+        isGeneratingChat = false
+      }
+      
+      // Destroy session and clear state
+      destroyPageChatSession()
+      isChatMode = false
+      chatMessages = []
+      
+      // Clear chat history from storage
+      await clearPageChatHistory(location.href)
+      
+      console.log('[Content] ✅ Chat session cleared')
+      
+      // Re-render to show "Ask Follow-up" button again
+      renderPageSummary(currentPageSummary, currentPageText)
+    } else {
+      // Ask Follow-up mode - create session
       isChatMode = true
       
       const targetLang = (await getSetting<string>('targetLang')) || 'en'

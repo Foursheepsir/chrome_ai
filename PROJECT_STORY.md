@@ -219,7 +219,7 @@ We also adjust length dynamically based on input size:
 ```typescript
 const wordCount = text.split(/\s+/).length
 const length = wordCount < 200 ? 'short' 
-             : wordCount < 500 ? 'medium' 
+             : wordCount < 800 ? 'medium' 
              : 'long'
 ```
 

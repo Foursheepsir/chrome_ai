@@ -34,7 +34,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.ts-loader-D99H4g_7.js"
+        "assets/index.ts-loader-BB_Rsp0I.js"
       ],
       "matches": [
         "<all_urls>"
@@ -69,8 +69,8 @@
         "public/*",
         "assets/storage-DBII9k0A.js",
         "assets/storage-DBII9k0A.js.map",
-        "assets/index.ts-DkqNrW8o.js",
-        "assets/index.ts-DkqNrW8o.js.map"
+        "assets/index.ts-D5RYXlkT.js",
+        "assets/index.ts-D5RYXlkT.js.map"
       ],
       "use_dynamic_url": false
     }

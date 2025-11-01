@@ -347,6 +347,15 @@
     box-shadow: 0 4px 16px rgba(255, 107, 53, 0.4) !important;
   }
   
+  /* Clear Session button styling (when chat is active) */
+  .ai-panel-actions button#__ai_ask_followup__.clear-mode {
+    background: linear-gradient(135deg, #dc2626, #991b1b) !important;
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3) !important;
+  }
+  .ai-panel-actions button#__ai_ask_followup__.clear-mode:hover:not(:disabled) {
+    box-shadow: 0 4px 16px rgba(220, 38, 38, 0.4) !important;
+  }
+  
   /* ===== Chat UI ===== */
   .ai-chat-container {
     display: flex !important;
