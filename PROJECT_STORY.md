@@ -409,10 +409,10 @@ interface PageChatHistory {
 
 ### Challenge 7: **Performance on Large Pages**
 
-**Problem:** Extracting text from massive pages (10,000+ words) blocked the UI.
+**Problem:** Extracting text from massive pages (20,000+ words) blocked the UI.
 
 **Solution:** 
-- Truncate to first ~2000 words for summarization
+- Truncate to first ~3000 words for summarization
 - Stream results to avoid blocking
 - Use flags to prevent duplicate generation requests and ensure idempotence
 
@@ -531,6 +531,12 @@ As $C \uparrow$ and $Q \downarrow$, $R_{\text{comprehension}} \downarrow$ rapidl
 5. **Offline Mode Indicator**
    - Visual badge showing when AI is fully offline
    - Reassure users about privacy
+
+6. **Automatic Resource Cleanup**
+   - Scheduled cleanup of old cached summaries and chat histories
+   - Configurable retention period (e.g., keep last 30 days)
+   - Prevent storage bloat while preserving recent context
+   - Optional: notify users before cleanup with review option
 
 ---
 

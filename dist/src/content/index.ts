@@ -674,7 +674,6 @@ async function openPanelAndSummarizePage(forceRefresh = false) {
         console.log('[Content] ✅ Page content matches, restoring chat history')
         console.log('[Content] 📜 Restored', chatHistory.messages.length, 'messages from storage')
         chatMessages = chatHistory.messages
-        // 如果有聊天历史，设置为聊天模式
         if (chatMessages.length > 0) {
           isChatMode = true
           console.log('[Content] Setting isChatMode = true (chat history exists)')
