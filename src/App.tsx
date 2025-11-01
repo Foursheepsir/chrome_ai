@@ -148,7 +148,7 @@ export default function App() {
           </p>
           <div className="welcome-footer">
             <a 
-              href="https://developer.chrome.com/docs/ai/built-in" 
+              href="https://github.com/Foursheepsir/chrome_ai" 
               target="_blank" 
               rel="noopener noreferrer"
               className="learn-more-link"
